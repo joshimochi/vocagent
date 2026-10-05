@@ -22,7 +22,9 @@ def load_providers(spec: str) -> Providers:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Generate a subtitled video from vocabulary.")
+    parser = argparse.ArgumentParser(
+        prog="vocagent", description="Generate a subtitled video from vocabulary.",
+    )
     parser.add_argument("vocabulary", nargs="+", help="Words or quoted phrases to include")
     parser.add_argument("--output-dir", type=Path, default=Path("output"),
                         help="New or empty output directory (default: output)")

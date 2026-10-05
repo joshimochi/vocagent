@@ -3,8 +3,8 @@
 import unittest
 from unittest.mock import Mock
 
-from vocab_video_generator.models import SafetyResult
-from vocab_video_generator.selection import (
+from vocagent.models import SafetyResult
+from vocagent.selection import (
     HumanInterventionRequired,
     select_candidate,
 )

@@ -2,8 +2,8 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from vocab_video_generator.models import TranscriptSegment
-from vocab_video_generator.subtitles import validate_segments, write_ass
+from vocagent.models import TranscriptSegment
+from vocagent.subtitles import validate_segments, write_ass
 
 
 class SubtitleTests(unittest.TestCase):

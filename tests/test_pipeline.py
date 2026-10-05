@@ -6,14 +6,14 @@ import tempfile
 import unittest
 from unittest.mock import Mock, call
 
-from vocab_video_generator.media import FFmpegMedia
-from vocab_video_generator.models import SafetyResult, TranscriptSegment
-from vocab_video_generator.pipeline import Workflow
-from vocab_video_generator.providers import (
+from vocagent.media import FFmpegMedia
+from vocagent.models import SafetyResult, TranscriptSegment
+from vocagent.pipeline import Workflow
+from vocagent.providers import (
     LLMGenerator, Providers, SpeechToText, TextQualityAgent, TextSafetyAgent,
     VideoGenerator, VideoQualityModel, VideoSafetyModel,
 )
-from vocab_video_generator.selection import HumanInterventionRequired
+from vocagent.selection import HumanInterventionRequired
 
 
 class PipelineTests(unittest.TestCase):

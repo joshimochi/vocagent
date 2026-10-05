@@ -8,9 +8,9 @@ from types import ModuleType, SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
 
-from vocab_video_generator.__main__ import load_providers, main
-from vocab_video_generator.models import SafetyResult
-from vocab_video_generator.providers import LLMGenerator, Providers, TextSafetyAgent
+from vocagent.__main__ import load_providers, main
+from vocagent.models import SafetyResult
+from vocagent.providers import LLMGenerator, Providers, TextSafetyAgent
 
 
 class CLITests(unittest.TestCase):
@@ -34,7 +34,7 @@ class CLITests(unittest.TestCase):
         providers = Providers(llm=llm, text_safety=safety)
         with tempfile.TemporaryDirectory() as temporary:
             stderr = io.StringIO()
-            with patch("vocab_video_generator.__main__.load_providers", return_value=providers), \
+            with patch("vocagent.__main__.load_providers", return_value=providers), \
                     redirect_stderr(stderr):
                 status = main(["apple", "--providers", "example:build", "--output-dir", temporary])
 
@@ -47,8 +47,8 @@ class CLITests(unittest.TestCase):
         providers = Providers()
         final_path = Path("/tmp/example-final.mp4")
         stdout = io.StringIO()
-        with patch("vocab_video_generator.__main__.load_providers", return_value=providers) as load, \
-                patch("vocab_video_generator.__main__.Workflow") as workflow, \
+        with patch("vocagent.__main__.load_providers", return_value=providers) as load, \
+                patch("vocagent.__main__.Workflow") as workflow, \
                 redirect_stdout(stdout):
             workflow.return_value.run.return_value = SimpleNamespace(final_video=final_path)
             status = main(["apple", "green pear", "--providers", "example:build",

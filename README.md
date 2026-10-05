@@ -1,4 +1,4 @@
-# Vocabulary video generator
+# vocagent
 
 A small Python implementation of [workflow.md](workflow.md), using only the
 standard library. Python 3.10+ is required. FFmpeg must be on `PATH`, with the
@@ -40,7 +40,7 @@ run in a new or empty directory; automatic resume is not implemented.
 ## Connect providers
 
 Implement the methods in
-[`vocab_video_generator/providers.py`](vocab_video_generator/providers.py).
+[`vocagent/providers.py`](vocagent/providers.py).
 You can subclass the stubs or supply objects with matching methods. A video
 provider must write a nonempty video with an audio track to the requested path.
 Safety providers return `SafetyResult(safe=True)` or
@@ -52,7 +52,7 @@ Create a module such as `my_providers.py` with a factory that returns a
 `Providers` instance containing your implementations:
 
 ```python
-from vocab_video_generator.providers import Providers
+from vocagent.providers import Providers
 
 
 def create_providers():
@@ -71,7 +71,7 @@ The `My...` classes above stand for your implementations; they are intentionally
 not included. Then run from the repository root:
 
 ```sh
-python3 -m vocab_video_generator sunrise curious journey \
+python3 -m vocagent sunrise curious journey \
   --providers my_providers:create_providers --output-dir output
 ```
 
@@ -83,14 +83,14 @@ human intervention is required. The output directory must be new or empty.
 The same pipeline can be called from Python:
 
 ```python
-from vocab_video_generator.pipeline import Workflow
+from vocagent.pipeline import Workflow
 from my_providers import create_providers
 
 result = Workflow(create_providers()).run(["sunrise", "curious"], "output")
 print(result.final_video)
 ```
 
-Optional installation with `python3 -m pip install -e .` adds the `vocab-video`
+Optional installation with `python3 -m pip install -e .` adds the `vocagent`
 command. There are no Python runtime dependencies.
 
 ## Outputs

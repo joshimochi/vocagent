@@ -6,9 +6,9 @@ import unittest
 from unittest.mock import patch
 import wave
 
-from vocab_video_generator.media import FFmpegMedia, MediaError
-from vocab_video_generator.models import TranscriptSegment
-from vocab_video_generator.subtitles import write_ass
+from vocagent.media import FFmpegMedia, MediaError
+from vocagent.models import TranscriptSegment
+from vocagent.subtitles import write_ass
 
 
 class MediaTests(unittest.TestCase):
@@ -22,7 +22,7 @@ class MediaTests(unittest.TestCase):
         self.subtitles.write_text("subtitle content", encoding="utf-8")
         self.media = FFmpegMedia()
 
-    @patch("vocab_video_generator.media.subprocess.run")
+    @patch("vocagent.media.subprocess.run")
     def test_audio_command_preserves_paths_and_requests_speech_format(self, run):
         output = self.root / "nested" / "audio.wav"
         self.assertEqual(self.media.extract_audio(self.video, output), output)
@@ -34,7 +34,7 @@ class MediaTests(unittest.TestCase):
         self.assertTrue(run.call_args.kwargs["check"])
         self.assertNotIn("shell", run.call_args.kwargs)
 
-    @patch("vocab_video_generator.media.subprocess.run")
+    @patch("vocagent.media.subprocess.run")
     def test_burn_uses_safe_fixed_subtitle_name_in_temporary_directory(self, run):
         copied_directories = []
 
@@ -53,7 +53,7 @@ class MediaTests(unittest.TestCase):
         self.assertEqual(self.media.burn_subtitles(self.video, self.subtitles, output), output)
         self.assertFalse(copied_directories[0].exists())
 
-    @patch("vocab_video_generator.media.subprocess.run")
+    @patch("vocagent.media.subprocess.run")
     def test_rejects_overwriting_inputs_including_aliases(self, run):
         alias = self.root / "alias.mp4"
         alias.symlink_to(self.video)
@@ -66,13 +66,13 @@ class MediaTests(unittest.TestCase):
             self.media.burn_subtitles(self.video, self.subtitles, self.subtitles)
         run.assert_not_called()
 
-    @patch("vocab_video_generator.media.subprocess.run")
+    @patch("vocagent.media.subprocess.run")
     def test_missing_input_is_reported_before_running_ffmpeg(self, run):
         with self.assertRaises(FileNotFoundError):
             self.media.extract_audio(self.root / "missing.mp4", self.root / "audio.wav")
         run.assert_not_called()
 
-    @patch("vocab_video_generator.media.subprocess.run")
+    @patch("vocagent.media.subprocess.run")
     def test_ffmpeg_errors_include_diagnostic(self, run):
         run.side_effect = subprocess.CalledProcessError(1, ["ffmpeg"], stderr="No audio stream")
         with self.assertRaisesRegex(MediaError, "No audio stream"):
@@ -81,7 +81,7 @@ class MediaTests(unittest.TestCase):
         with self.assertRaisesRegex(MediaError, "executable was not found"):
             self.media.extract_audio(self.video, self.root / "audio.wav")
 
-    @patch("vocab_video_generator.media.subprocess.run")
+    @patch("vocagent.media.subprocess.run")
     def test_missing_libass_error_explains_required_ffmpeg_support(self, run):
         run.side_effect = subprocess.CalledProcessError(
             1, ["ffmpeg"], stderr="No option name near 'subtitles.ass'"
