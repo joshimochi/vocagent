@@ -56,11 +56,59 @@ class CLITests(unittest.TestCase):
 
         self.assertEqual(status, 0)
         load.assert_called_once_with("example:build")
-        workflow.assert_called_once_with(providers)
+        workflow.assert_called_once_with(
+            providers, outline_candidate_count=4, storyboard_candidate_count=4,
+            video_candidate_count=4,
+        )
         workflow.return_value.run.assert_called_once_with(
             ["apple", "green pear"], Path("chosen-output"),
         )
         self.assertEqual(stdout.getvalue(), f"{final_path}\n")
+
+    def test_candidate_counts_are_forwarded_independently(self):
+        providers = Providers()
+        with patch("vocagent.__main__.load_providers", return_value=providers), \
+                patch("vocagent.__main__.Workflow") as workflow, \
+                redirect_stdout(io.StringIO()):
+            workflow.return_value.run.return_value = SimpleNamespace(
+                final_video=Path("chosen-output/final.mp4"),
+            )
+            status = main([
+                "apple", "--providers", "example:build",
+                "--outline-candidate-count", "1",
+                "--storyboard-candidate-count", "3",
+                "--video-candidate-count", "6",
+            ])
+
+        self.assertEqual(status, 0)
+        workflow.assert_called_once_with(
+            providers, outline_candidate_count=1, storyboard_candidate_count=3,
+            video_candidate_count=6,
+        )
+
+    def test_invalid_candidate_counts_stop_before_providers_or_output(self):
+        for stage in ("outline", "storyboard", "video"):
+            flag = f"--{stage}-candidate-count"
+            for value in ("0", "-1", "1.5", "invalid"):
+                with self.subTest(stage=stage, value=value), \
+                        tempfile.TemporaryDirectory() as temporary:
+                    output = Path(temporary) / "result"
+                    stderr = io.StringIO()
+                    stdout = io.StringIO()
+                    with patch("vocagent.__main__.load_providers") as load, \
+                            patch("vocagent.__main__.Workflow") as workflow, \
+                            redirect_stderr(stderr), redirect_stdout(stdout), \
+                            self.assertRaises(SystemExit) as raised:
+                        main(["apple", "--providers", "example:build",
+                              "--output-dir", str(output), flag, value])
+
+                    self.assertEqual(raised.exception.code, 2)
+                    self.assertIn(flag, stderr.getvalue())
+                    self.assertIn("must be a positive integer", stderr.getvalue())
+                    self.assertEqual(stdout.getvalue(), "")
+                    load.assert_not_called()
+                    workflow.assert_not_called()
+                    self.assertFalse(output.exists())
 
     def test_provider_load_failure_is_a_clear_cli_error(self):
         stderr = io.StringIO()

@@ -3,8 +3,9 @@
 Generation, safety assessment, and quality selection are separate dependencies.
 Text safety and quality must use agents separate from the generating agent;
 video safety and quality must use specialized models.
-Generation and safety methods must support up to four concurrent calls on the
-same instance. Quality judging runs after all candidate slots finish.
+Generation and safety methods must support concurrent calls on the same instance,
+up to the stage's configured candidate count (four by default). Quality judging
+runs after all candidate slots finish.
 """
 
 from dataclasses import dataclass, field

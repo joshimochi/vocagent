@@ -10,6 +10,16 @@ from .providers import Providers
 from .selection import HumanInterventionRequired
 
 
+def positive_integer(value: str) -> int:
+    try:
+        count = int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError("must be a positive integer") from None
+    if count < 1:
+        raise argparse.ArgumentTypeError("must be a positive integer")
+    return count
+
+
 def load_providers(spec: str) -> Providers:
     module_name, separator, factory_name = spec.partition(":")
     if not separator or not module_name or not factory_name:
@@ -30,10 +40,21 @@ def main(argv: list[str] | None = None) -> int:
                         help="New or empty output directory (default: output)")
     parser.add_argument("--providers", metavar="MODULE:FACTORY",
                         help="Factory returning configured Providers; defaults to unimplemented stubs")
+    parser.add_argument("--outline-candidate-count", type=positive_integer, default=4,
+                        help="Number of outline candidate slots (default: 4)")
+    parser.add_argument("--storyboard-candidate-count", type=positive_integer, default=4,
+                        help="Number of storyboard candidate slots (default: 4)")
+    parser.add_argument("--video-candidate-count", type=positive_integer, default=4,
+                        help="Number of video candidate slots (default: 4)")
     args = parser.parse_args(argv)
     try:
         providers = load_providers(args.providers) if args.providers else Providers()
-        result = Workflow(providers).run(args.vocabulary, args.output_dir)
+        result = Workflow(
+            providers,
+            outline_candidate_count=args.outline_candidate_count,
+            storyboard_candidate_count=args.storyboard_candidate_count,
+            video_candidate_count=args.video_candidate_count,
+        ).run(args.vocabulary, args.output_dir)
     except HumanInterventionRequired as exc:
         print(f"Human intervention required: {exc}", file=sys.stderr)
         return 2

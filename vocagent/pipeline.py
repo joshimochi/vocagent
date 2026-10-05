@@ -13,9 +13,27 @@ from .subtitles import validate_segments, write_ass
 
 
 class Workflow:
-    def __init__(self, providers: Providers, media: FFmpegMedia | None = None):
+    def __init__(
+        self,
+        providers: Providers,
+        media: FFmpegMedia | None = None,
+        *,
+        outline_candidate_count: int = 4,
+        storyboard_candidate_count: int = 4,
+        video_candidate_count: int = 4,
+    ):
+        for name, count in (
+            ("outline_candidate_count", outline_candidate_count),
+            ("storyboard_candidate_count", storyboard_candidate_count),
+            ("video_candidate_count", video_candidate_count),
+        ):
+            if type(count) is not int or count < 1:
+                raise ValueError(f"{name} must be a positive integer.")
         self.providers = providers
         self.media = media if media is not None else FFmpegMedia()
+        self.outline_candidate_count = outline_candidate_count
+        self.storyboard_candidate_count = storyboard_candidate_count
+        self.video_candidate_count = video_candidate_count
 
     def run(self, vocabulary: Sequence[str], output_dir: str | Path) -> WorkflowResult:
         if isinstance(vocabulary, str) or not vocabulary:
@@ -40,6 +58,7 @@ class Workflow:
 
         outline = select_candidate(
             stage="outline",
+            candidate_count=self.outline_candidate_count,
             generate=lambda slot, attempt, feedback: checked_text(
                 providers.llm.generate_outline(words, feedback)
             ),
@@ -54,6 +73,7 @@ class Workflow:
 
         storyboard = select_candidate(
             stage="storyboard",
+            candidate_count=self.storyboard_candidate_count,
             generate=lambda slot, attempt, feedback: checked_text(
                 providers.llm.generate_storyboard(words, outline, feedback)
             ),
@@ -83,6 +103,7 @@ class Workflow:
 
         selected_video = select_candidate(
             stage="video",
+            candidate_count=self.video_candidate_count,
             generate=generate_video,
             check_safety=check_video,
             choose_best=lambda candidates: providers.video_quality.choose(storyboard, candidates),

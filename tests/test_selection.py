@@ -135,22 +135,43 @@ class SelectionTests(unittest.TestCase):
             self.assertIsNone(slot_calls[0][2])
 
     def test_no_survivors_stop_for_human_intervention_with_exact_budget(self):
-        generate = Mock(return_value="unsafe")
-        check = Mock(return_value=SafetyResult(False, "unsafe"))
-        judge = Mock()
+        for candidate_count in (1, 4, 6):
+            with self.subTest(candidate_count=candidate_count):
+                generate = Mock(return_value="unsafe")
+                check = Mock(return_value=SafetyResult(False, "unsafe"))
+                judge = Mock()
 
-        with self.assertRaisesRegex(HumanInterventionRequired, "video.*human intervention"):
-            select_candidate(
-                stage="video", generate=generate, check_safety=check,
-                choose_best=judge, pass_feedback=False,
-            )
+                with self.assertRaisesRegex(
+                    HumanInterventionRequired,
+                    f"video.*{candidate_count} slots.*human intervention",
+                ):
+                    select_candidate(
+                        stage="video", generate=generate, check_safety=check,
+                        choose_best=judge, pass_feedback=False,
+                        candidate_count=candidate_count,
+                    )
 
-        self.assertEqual(generate.call_count, 16)
-        self.assertEqual(check.call_count, 16)
-        self.assertCountEqual(
-            [call.args[:2] for call in generate.call_args_list],
-            [(slot, attempt) for slot in range(1, 5) for attempt in range(1, 5)],
-        )
+                self.assertEqual(generate.call_count, candidate_count * 4)
+                self.assertEqual(check.call_count, candidate_count * 4)
+                self.assertCountEqual(
+                    [call.args[:2] for call in generate.call_args_list],
+                    [(slot, attempt) for slot in range(1, candidate_count + 1)
+                     for attempt in range(1, 5)],
+                )
+                judge.assert_not_called()
+
+    def test_invalid_candidate_count_is_rejected_before_callbacks(self):
+        generate, check, judge = Mock(), Mock(), Mock()
+        for candidate_count in (0, -1, True, False, 1.5, "4", None):
+            with self.subTest(candidate_count=candidate_count):
+                with self.assertRaisesRegex(ValueError, "candidate_count.*positive integer"):
+                    select_candidate(
+                        stage="outline", generate=generate, check_safety=check,
+                        choose_best=judge, pass_feedback=True,
+                        candidate_count=candidate_count,
+                    )
+        generate.assert_not_called()
+        check.assert_not_called()
         judge.assert_not_called()
 
     def test_missing_unsafe_reason_gets_useful_feedback(self):

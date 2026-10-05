@@ -22,8 +22,9 @@ def select_candidate(
     check_safety: Callable[[T], SafetyResult],
     choose_best: Callable[[Sequence[T]], int],
     pass_feedback: bool,
+    candidate_count: int = 4,
 ) -> T:
-    """Choose among four concurrent slots, each with up to four safety attempts.
+    """Choose among configurable concurrent slots with up to four attempts each.
 
     The generator receives a one-based slot and attempt, plus the previous
     unsafe reason when feedback is enabled. The quality judge receives only
@@ -32,6 +33,8 @@ def select_candidate(
     Each slot's retries remain sequential. Provider exceptions stop new attempts
     and propagate after in-flight work finishes, without becoming safety failures.
     """
+    if type(candidate_count) is not int or candidate_count < 1:
+        raise ValueError(f"{stage}: candidate_count must be a positive integer.")
     stopped = Event()
 
     def generate_slot(slot: int) -> list[T]:
@@ -63,16 +66,16 @@ def select_candidate(
             raise
         return []
 
-    with ThreadPoolExecutor(max_workers=4) as executor:
+    with ThreadPoolExecutor(max_workers=candidate_count) as executor:
         accepted = [
             candidate
-            for survivors in executor.map(generate_slot, range(1, 5))
+            for survivors in executor.map(generate_slot, range(1, candidate_count + 1))
             for candidate in survivors
         ]
 
     if not accepted:
         raise HumanInterventionRequired(
-            f"{stage}: no safe candidate after four slots with four attempts "
+            f"{stage}: no safe candidate after {candidate_count} slots with four attempts "
             "each; human intervention is required."
         )
 

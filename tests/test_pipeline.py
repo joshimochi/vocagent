@@ -142,6 +142,64 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(self.llm.generate_storyboard.call_count, 4)
         self.assertEqual(self.video.generate.call_count, 4)
 
+    def test_candidate_counts_are_independent_and_control_stage_concurrency(self):
+        self.text_quality.choose.side_effect = (
+            lambda stage, vocabulary, candidates: len(candidates) - 1
+        )
+        self.video_quality.choose.side_effect = (
+            lambda storyboard, candidates: len(candidates) - 1
+        )
+        for generator, count in (
+            (self.llm.generate_outline, 1),
+            (self.llm.generate_storyboard, 3),
+            (self.video.generate, 5),
+        ):
+            barrier = Barrier(count, timeout=5)
+            original = generator.side_effect
+
+            def concurrent_generate(*args, barrier=barrier, original=original):
+                barrier.wait()
+                return original(*args)
+
+            generator.side_effect = concurrent_generate
+
+        workflow = Workflow(
+            self.providers, self.media,
+            outline_candidate_count=1,
+            storyboard_candidate_count=3,
+            video_candidate_count=5,
+        )
+        result = workflow.run(["apple"], self.output)
+
+        self.assertEqual(self.llm.generate_outline.call_count, 1)
+        self.assertEqual(self.llm.generate_storyboard.call_count, 3)
+        self.assertEqual(self.video.generate.call_count, 5)
+        outline_call, storyboard_call = self.text_quality.choose.call_args_list
+        self.assertEqual(len(outline_call.args[2]), 1)
+        self.assertEqual(len(storyboard_call.args[2]), 3)
+        self.assertEqual(result.outline.read_text(), outline_call.args[2][-1])
+        self.assertEqual(result.storyboard.read_text(), storyboard_call.args[2][-1])
+        videos = self.video_quality.choose.call_args.args[1]
+        self.assertEqual(
+            [video.name for video in videos],
+            [f"candidate-{slot}-attempt-1.mp4" for slot in range(1, 6)],
+        )
+        self.assertEqual(result.selected_video, videos[-1])
+        self.assertTrue(result.final_video.is_file())
+
+    def test_invalid_candidate_counts_are_rejected_before_starting_work(self):
+        for name in (
+            "outline_candidate_count", "storyboard_candidate_count", "video_candidate_count",
+        ):
+            for count in (0, -1, True, False, 1.5, "4", None):
+                with self.subTest(name=name, count=count):
+                    with self.assertRaisesRegex(ValueError, f"{name}.*positive integer"):
+                        Workflow(self.providers, self.media, **{name: count})
+        self.assertFalse(self.output.exists())
+        self.llm.generate_outline.assert_not_called()
+        self.llm.generate_storyboard.assert_not_called()
+        self.video.generate.assert_not_called()
+
     def test_text_safety_feedback_reaches_only_the_retried_stage(self):
         self.text_safety.check.side_effect = (
             lambda stage, text: SafetyResult(text != "outline 1", "remove unsafe content")
