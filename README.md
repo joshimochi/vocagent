@@ -21,9 +21,10 @@ model API calls in the application.
 8. Burn the subtitles into the selected video with FFmpeg, preserving its audio.
 
 Each of the three generation stages has an independently configurable candidate
-count, defaulting to four. A stage fills its candidate slots concurrently,
-using up to its configured count of worker threads. Each slot gets at most four sequential
-generation/safety attempts. A safe candidate ends that slot's retries; an
+count, defaulting to four. A stage fills its candidate slots sequentially by
+default. Enable concurrent candidate generation to use up to its configured count
+of worker threads. Each slot gets at most four sequential generation/safety
+attempts. A safe candidate ends that slot's retries; an
 exhausted slot is ignored. Once all slots finish, the quality judge picks from
 the safe candidates in slot order, even if only one survived. If none survived,
 the workflow raises `HumanInterventionRequired` and stops before the next stage.
@@ -47,10 +48,11 @@ Implement the methods in
 [`vocagent/providers.py`](vocagent/providers.py).
 You can subclass the stubs or supply objects with matching methods. A video
 provider must write a nonempty video with an audio track to the requested path.
-Generation and safety providers must support up to the configured candidate
-count of concurrent calls on the same instance for each stage. Each video attempt
-receives a distinct output path. Each stage's
-quality judge runs once after all slots finish; workflow stages remain sequential.
+When concurrent candidate generation is enabled, generation and safety providers
+must be thread-safe for up to the configured candidate count of concurrent calls
+on the same instance for each stage. Each video attempt receives a distinct
+output path. Each stage's quality judge runs once after all slots finish;
+workflow stages remain sequential.
 Safety providers return `SafetyResult(safe=True)` or
 `SafetyResult(safe=False, reason="...")`. Quality providers return a zero-based
 index into the safe candidates passed to them. Speech-to-text returns
@@ -88,6 +90,8 @@ The three candidate count flags accept positive integers and each defaults to
 `4` when omitted. They change the number of candidate slots, while each slot
 still gets at most four generation/safety attempts.
 
+Add `--concurrent-candidates` to enable concurrent candidate generation.
+
 Without `--providers`, the CLI uses the stubs and stops at the first LLM call
 with a clear unimplemented message. Exit codes are `0` for success, `1` for
 provider/configuration/media errors, and `2` when all candidates fail safety and
@@ -111,7 +115,8 @@ print(result.final_video)
 ```
 
 The three Python keyword arguments also accept positive integers and each
-defaults to `4` when omitted.
+defaults to `4` when omitted. Add `concurrent_candidates=True` to the `Workflow`
+constructor to enable concurrent candidate generation.
 
 Optional installation with `python3 -m pip install -e .` adds the `vocagent`
 command. There are no Python runtime dependencies.

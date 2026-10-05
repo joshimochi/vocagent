@@ -3,7 +3,7 @@
 import json
 from pathlib import Path
 import tempfile
-from threading import Barrier, Lock
+from threading import Barrier, Lock, current_thread
 import unittest
 from unittest.mock import Mock, call
 
@@ -122,7 +122,49 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(result.audio.read_bytes(), b"fake audio")
         self.assertEqual(result.final_video.read_bytes(), b"fake subtitled video")
 
-    def test_all_four_generations_overlap_in_each_stage(self):
+    def test_generation_and_safety_run_sequentially_by_default(self):
+        caller = current_thread()
+        events = []
+        for label, method in (
+            ("outline", self.llm.generate_outline),
+            ("storyboard", self.llm.generate_storyboard),
+            ("video", self.video.generate),
+            ("text safety", self.text_safety.check),
+            ("video safety", self.video_safety.check),
+        ):
+            original = method.side_effect
+            result = method.return_value
+
+            def record(*args, label=label, original=original, result=result):
+                self.assertIs(current_thread(), caller)
+                events.append(label)
+                return original(*args) if original is not None else result
+
+            method.side_effect = record
+
+        self.text_quality.choose.side_effect = (
+            lambda stage, vocabulary, candidates: len(candidates) - 1
+        )
+        self.video_quality.choose.side_effect = (
+            lambda storyboard, candidates: len(candidates) - 1
+        )
+        for counts in ({}, {
+            "outline_candidate_count": 1,
+            "storyboard_candidate_count": 3,
+            "video_candidate_count": 5,
+        }):
+            with self.subTest(counts=counts):
+                events.clear()
+                workflow = Workflow(self.providers, self.media, **counts)
+                workflow.run(["apple"], self.output / ("configured" if counts else "default"))
+
+                self.assertEqual(events, (
+                    ["outline", "text safety"] * counts.get("outline_candidate_count", 4)
+                    + ["storyboard", "text safety"] * counts.get("storyboard_candidate_count", 4)
+                    + ["video", "video safety"] * counts.get("video_candidate_count", 4)
+                ))
+
+    def test_all_four_generations_overlap_in_each_stage_when_enabled(self):
         for generator in (
             self.llm.generate_outline, self.llm.generate_storyboard, self.video.generate,
         ):
@@ -135,7 +177,8 @@ class PipelineTests(unittest.TestCase):
 
             generator.side_effect = concurrent_generate
 
-        result = self.workflow.run(["apple"], self.output)
+        workflow = Workflow(self.providers, self.media, concurrent_candidates=True)
+        result = workflow.run(["apple"], self.output)
 
         self.assertTrue(result.final_video.is_file())
         self.assertEqual(self.llm.generate_outline.call_count, 4)
@@ -168,6 +211,7 @@ class PipelineTests(unittest.TestCase):
             outline_candidate_count=1,
             storyboard_candidate_count=3,
             video_candidate_count=5,
+            concurrent_candidates=True,
         )
         result = workflow.run(["apple"], self.output)
 

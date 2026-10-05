@@ -21,6 +21,7 @@ class Workflow:
         outline_candidate_count: int = 4,
         storyboard_candidate_count: int = 4,
         video_candidate_count: int = 4,
+        concurrent_candidates: bool = False,
     ):
         for name, count in (
             ("outline_candidate_count", outline_candidate_count),
@@ -34,6 +35,7 @@ class Workflow:
         self.outline_candidate_count = outline_candidate_count
         self.storyboard_candidate_count = storyboard_candidate_count
         self.video_candidate_count = video_candidate_count
+        self.concurrent_candidates = concurrent_candidates
 
     def run(self, vocabulary: Sequence[str], output_dir: str | Path) -> WorkflowResult:
         if isinstance(vocabulary, str) or not vocabulary:
@@ -67,6 +69,7 @@ class Workflow:
                 "outline", words, candidates
             ),
             pass_feedback=True,
+            concurrent_candidates=self.concurrent_candidates,
         )
         outline_path = output / "outline.txt"
         outline_path.write_text(outline, encoding="utf-8")
@@ -82,6 +85,7 @@ class Workflow:
                 "storyboard", words, candidates
             ),
             pass_feedback=True,
+            concurrent_candidates=self.concurrent_candidates,
         )
         storyboard_path = output / "storyboard.txt"
         storyboard_path.write_text(storyboard, encoding="utf-8")
@@ -108,6 +112,7 @@ class Workflow:
             check_safety=check_video,
             choose_best=lambda candidates: providers.video_quality.choose(storyboard, candidates),
             pass_feedback=False,
+            concurrent_candidates=self.concurrent_candidates,
         )
 
         audio_path = output / "audio.wav"

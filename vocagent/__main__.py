@@ -46,6 +46,8 @@ def main(argv: list[str] | None = None) -> int:
                         help="Number of storyboard candidate slots (default: 4)")
     parser.add_argument("--video-candidate-count", type=positive_integer, default=4,
                         help="Number of video candidate slots (default: 4)")
+    parser.add_argument("--concurrent-candidates", action="store_true",
+                        help="Generate candidate slots concurrently (default: sequential)")
     args = parser.parse_args(argv)
     try:
         providers = load_providers(args.providers) if args.providers else Providers()
@@ -54,6 +56,7 @@ def main(argv: list[str] | None = None) -> int:
             outline_candidate_count=args.outline_candidate_count,
             storyboard_candidate_count=args.storyboard_candidate_count,
             video_candidate_count=args.video_candidate_count,
+            concurrent_candidates=args.concurrent_candidates,
         ).run(args.vocabulary, args.output_dir)
     except HumanInterventionRequired as exc:
         print(f"Human intervention required: {exc}", file=sys.stderr)

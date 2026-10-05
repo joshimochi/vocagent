@@ -58,7 +58,7 @@ class CLITests(unittest.TestCase):
         load.assert_called_once_with("example:build")
         workflow.assert_called_once_with(
             providers, outline_candidate_count=4, storyboard_candidate_count=4,
-            video_candidate_count=4,
+            video_candidate_count=4, concurrent_candidates=False,
         )
         workflow.return_value.run.assert_called_once_with(
             ["apple", "green pear"], Path("chosen-output"),
@@ -66,25 +66,28 @@ class CLITests(unittest.TestCase):
         self.assertEqual(stdout.getvalue(), f"{final_path}\n")
 
     def test_candidate_counts_are_forwarded_independently(self):
-        providers = Providers()
-        with patch("vocagent.__main__.load_providers", return_value=providers), \
-                patch("vocagent.__main__.Workflow") as workflow, \
-                redirect_stdout(io.StringIO()):
-            workflow.return_value.run.return_value = SimpleNamespace(
-                final_video=Path("chosen-output/final.mp4"),
-            )
-            status = main([
-                "apple", "--providers", "example:build",
-                "--outline-candidate-count", "1",
-                "--storyboard-candidate-count", "3",
-                "--video-candidate-count", "6",
-            ])
+        for concurrent_candidates in (False, True):
+            with self.subTest(concurrent_candidates=concurrent_candidates):
+                providers = Providers()
+                with patch("vocagent.__main__.load_providers", return_value=providers), \
+                        patch("vocagent.__main__.Workflow") as workflow, \
+                        redirect_stdout(io.StringIO()):
+                    workflow.return_value.run.return_value = SimpleNamespace(
+                        final_video=Path("chosen-output/final.mp4"),
+                    )
+                    status = main([
+                        "apple", "--providers", "example:build",
+                        *(["--concurrent-candidates"] if concurrent_candidates else []),
+                        "--outline-candidate-count", "1",
+                        "--storyboard-candidate-count", "3",
+                        "--video-candidate-count", "6",
+                    ])
 
-        self.assertEqual(status, 0)
-        workflow.assert_called_once_with(
-            providers, outline_candidate_count=1, storyboard_candidate_count=3,
-            video_candidate_count=6,
-        )
+                self.assertEqual(status, 0)
+                workflow.assert_called_once_with(
+                    providers, outline_candidate_count=1, storyboard_candidate_count=3,
+                    video_candidate_count=6, concurrent_candidates=concurrent_candidates,
+                )
 
     def test_invalid_candidate_counts_stop_before_providers_or_output(self):
         for stage in ("outline", "storyboard", "video"):
@@ -109,6 +112,22 @@ class CLITests(unittest.TestCase):
                     load.assert_not_called()
                     workflow.assert_not_called()
                     self.assertFalse(output.exists())
+
+    def test_concurrent_candidates_flag_enables_concurrency(self):
+        providers = Providers()
+        with patch("vocagent.__main__.load_providers", return_value=providers), \
+                patch("vocagent.__main__.Workflow") as workflow, \
+                redirect_stdout(io.StringIO()):
+            workflow.return_value.run.return_value = SimpleNamespace(
+                final_video=Path("/tmp/example-final.mp4"),
+            )
+            status = main(["apple", "--providers", "example:build", "--concurrent-candidates"])
+
+        self.assertEqual(status, 0)
+        workflow.assert_called_once_with(
+            providers, outline_candidate_count=4, storyboard_candidate_count=4,
+            video_candidate_count=4, concurrent_candidates=True,
+        )
 
     def test_provider_load_failure_is_a_clear_cli_error(self):
         stderr = io.StringIO()
