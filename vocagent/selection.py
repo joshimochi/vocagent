@@ -22,13 +22,15 @@ def select_candidate(
     check_safety: Callable[[T], SafetyResult],
     choose_best: Callable[[Sequence[T]], int],
     pass_feedback: bool,
+    concurrent_candidates: bool = False,
 ) -> T:
-    """Choose among four concurrent slots, each with up to four safety attempts.
+    """Choose among four slots, each with up to four safety attempts.
 
     The generator receives a one-based slot and attempt, plus the previous
     unsafe reason when feedback is enabled. The quality judge receives only
     the safe survivors in slot order and returns a zero-based index into that
-    sequence. Generation and safety callbacks must support concurrent calls.
+    sequence. Slots run sequentially by default. With concurrent_candidates=True,
+    generation and safety callbacks must support up to four concurrent calls.
     Each slot's retries remain sequential. Provider exceptions stop new attempts
     and propagate after in-flight work finishes, without becoming safety failures.
     """
@@ -63,12 +65,12 @@ def select_candidate(
             raise
         return []
 
-    with ThreadPoolExecutor(max_workers=4) as executor:
-        accepted = [
-            candidate
-            for survivors in executor.map(generate_slot, range(1, 5))
-            for candidate in survivors
-        ]
+    if concurrent_candidates:
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            slot_results = list(executor.map(generate_slot, range(1, 5)))
+    else:
+        slot_results = [generate_slot(slot) for slot in range(1, 5)]
+    accepted = [candidate for survivors in slot_results for candidate in survivors]
 
     if not accepted:
         raise HumanInterventionRequired(

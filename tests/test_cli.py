@@ -56,11 +56,24 @@ class CLITests(unittest.TestCase):
 
         self.assertEqual(status, 0)
         load.assert_called_once_with("example:build")
-        workflow.assert_called_once_with(providers)
+        workflow.assert_called_once_with(providers, concurrent_candidates=False)
         workflow.return_value.run.assert_called_once_with(
             ["apple", "green pear"], Path("chosen-output"),
         )
         self.assertEqual(stdout.getvalue(), f"{final_path}\n")
+
+    def test_concurrent_candidates_flag_enables_concurrency(self):
+        providers = Providers()
+        with patch("vocagent.__main__.load_providers", return_value=providers), \
+                patch("vocagent.__main__.Workflow") as workflow, \
+                redirect_stdout(io.StringIO()):
+            workflow.return_value.run.return_value = SimpleNamespace(
+                final_video=Path("/tmp/example-final.mp4"),
+            )
+            status = main(["apple", "--providers", "example:build", "--concurrent-candidates"])
+
+        self.assertEqual(status, 0)
+        workflow.assert_called_once_with(providers, concurrent_candidates=True)
 
     def test_provider_load_failure_is_a_clear_cli_error(self):
         stderr = io.StringIO()

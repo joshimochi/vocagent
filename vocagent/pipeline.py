@@ -13,9 +13,16 @@ from .subtitles import validate_segments, write_ass
 
 
 class Workflow:
-    def __init__(self, providers: Providers, media: FFmpegMedia | None = None):
+    def __init__(
+        self,
+        providers: Providers,
+        media: FFmpegMedia | None = None,
+        *,
+        concurrent_candidates: bool = False,
+    ):
         self.providers = providers
         self.media = media if media is not None else FFmpegMedia()
+        self.concurrent_candidates = concurrent_candidates
 
     def run(self, vocabulary: Sequence[str], output_dir: str | Path) -> WorkflowResult:
         if isinstance(vocabulary, str) or not vocabulary:
@@ -48,6 +55,7 @@ class Workflow:
                 "outline", words, candidates
             ),
             pass_feedback=True,
+            concurrent_candidates=self.concurrent_candidates,
         )
         outline_path = output / "outline.txt"
         outline_path.write_text(outline, encoding="utf-8")
@@ -62,6 +70,7 @@ class Workflow:
                 "storyboard", words, candidates
             ),
             pass_feedback=True,
+            concurrent_candidates=self.concurrent_candidates,
         )
         storyboard_path = output / "storyboard.txt"
         storyboard_path.write_text(storyboard, encoding="utf-8")
@@ -87,6 +96,7 @@ class Workflow:
             check_safety=check_video,
             choose_best=lambda candidates: providers.video_quality.choose(storyboard, candidates),
             pass_feedback=False,
+            concurrent_candidates=self.concurrent_candidates,
         )
 
         audio_path = output / "audio.wav"

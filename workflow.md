@@ -8,7 +8,7 @@
 8. ffmpeg combines to final video
 
 For generating story outline, storyboard and video, use a safety + quality filter:
-1. Generate 4 candidates
+1. Generate 4 candidates sequentially by default, with optional concurrent generation using up to 4 worker threads.
 2. For each candidate, check safety until pass.
 3. Choose the best of the 4 candidates.
 

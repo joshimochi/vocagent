@@ -20,10 +20,11 @@ model API calls in the application.
 7. Write ASS subtitles using those timestamps.
 8. Burn the subtitles into the selected video with FFmpeg, preserving its audio.
 
-Each of the three generation stages fills four candidate slots concurrently,
-using up to four worker threads. Each slot gets at most four sequential
-generation/safety attempts. A safe candidate ends that slot's retries; an
-exhausted slot is ignored. Once all slots finish, the quality judge picks from
+Each of the three generation stages fills four candidate slots sequentially by
+default. Enable concurrent candidate generation to use up to four worker threads.
+Each slot gets at most four sequential generation/safety attempts. A safe
+candidate ends that slot's retries; an exhausted slot is ignored. Once all slots
+finish, the quality judge picks from
 the safe candidates in slot order, even if only one survived. If none survived,
 the workflow raises `HumanInterventionRequired` and stops before the next stage.
 
@@ -46,9 +47,10 @@ Implement the methods in
 [`vocagent/providers.py`](vocagent/providers.py).
 You can subclass the stubs or supply objects with matching methods. A video
 provider must write a nonempty video with an audio track to the requested path.
-Generation and safety providers must support up to four concurrent calls on the
-same instance. Each video attempt receives a distinct output path. Each stage's
-quality judge runs once after all slots finish; workflow stages remain sequential.
+When concurrent candidate generation is enabled, generation and safety providers
+must be thread-safe for up to four concurrent calls on the same instance. Each
+video attempt receives a distinct output path. Each stage's quality judge runs
+once after all slots finish; workflow stages remain sequential.
 Safety providers return `SafetyResult(safe=True)` or
 `SafetyResult(safe=False, reason="...")`. Quality providers return a zero-based
 index into the safe candidates passed to them. Speech-to-text returns
@@ -81,6 +83,8 @@ python3 -m vocagent sunrise curious journey \
   --providers my_providers:create_providers --output-dir output
 ```
 
+Add `--concurrent-candidates` to enable concurrent candidate generation.
+
 Without `--providers`, the CLI uses the stubs and stops at the first LLM call
 with a clear unimplemented message. Exit codes are `0` for success, `1` for
 provider/configuration/media errors, and `2` when all candidates fail safety and
@@ -95,6 +99,9 @@ from my_providers import create_providers
 result = Workflow(create_providers()).run(["sunrise", "curious"], "output")
 print(result.final_video)
 ```
+
+To enable concurrent candidate generation from Python, construct the workflow
+with `Workflow(create_providers(), concurrent_candidates=True)`.
 
 Optional installation with `python3 -m pip install -e .` adds the `vocagent`
 command. There are no Python runtime dependencies.

@@ -30,10 +30,14 @@ def main(argv: list[str] | None = None) -> int:
                         help="New or empty output directory (default: output)")
     parser.add_argument("--providers", metavar="MODULE:FACTORY",
                         help="Factory returning configured Providers; defaults to unimplemented stubs")
+    parser.add_argument("--concurrent-candidates", action="store_true",
+                        help="Generate candidate slots concurrently (default: sequential)")
     args = parser.parse_args(argv)
     try:
         providers = load_providers(args.providers) if args.providers else Providers()
-        result = Workflow(providers).run(args.vocabulary, args.output_dir)
+        result = Workflow(
+            providers, concurrent_candidates=args.concurrent_candidates,
+        ).run(args.vocabulary, args.output_dir)
     except HumanInterventionRequired as exc:
         print(f"Human intervention required: {exc}", file=sys.stderr)
         return 2

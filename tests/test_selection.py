@@ -50,7 +50,7 @@ class SelectionTests(unittest.TestCase):
         )
 
         self.assertEqual(result, (1, 3))
-        self.assertEqual(sorted(calls), [
+        self.assertEqual(calls, [
             (1, 1, None), (1, 2, "unsafe attempt 1"),
             (1, 3, "unsafe attempt 2"), (2, 1, None),
             (3, 1, None), (4, 1, None),
@@ -88,7 +88,7 @@ class SelectionTests(unittest.TestCase):
         judge = Mock(return_value=1)
         result = select_candidate(
             stage="outline", generate=generate, check_safety=check,
-            choose_best=judge, pass_feedback=True,
+            choose_best=judge, pass_feedback=True, concurrent_candidates=True,
         )
 
         self.assertEqual(result, (2, 2))
@@ -248,11 +248,7 @@ class SelectionTests(unittest.TestCase):
 
     def assert_first_attempts_only(self, generate):
         calls = [call.args for call in generate.call_args_list]
-        self.assertGreaterEqual(len(calls), 1)
-        self.assertLessEqual(len(calls), 4)
-        self.assertEqual(len({slot for slot, attempt, feedback in calls}), len(calls))
-        self.assertTrue(all(attempt == 1 and feedback is None
-                            for slot, attempt, feedback in calls))
+        self.assertEqual(calls, [(1, 1, None)])
 
     def test_quality_errors_propagate_without_regeneration(self):
         error = RuntimeError("quality judge unavailable")
