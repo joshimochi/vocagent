@@ -3,6 +3,7 @@
 import json
 from pathlib import Path
 import tempfile
+from threading import Barrier, Lock
 import unittest
 from unittest.mock import Mock, call
 
@@ -21,13 +22,20 @@ class PipelineTests(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.output = Path(self.temporary.name).resolve() / "result"
+        text_counts = {"outline": 0, "storyboard": 0}
+        text_lock = Lock()
+
+        def generate_text(stage):
+            with text_lock:
+                text_counts[stage] += 1
+                return f"{stage} {text_counts[stage]}"
+
         self.llm = Mock(spec=LLMGenerator)
         self.llm.generate_outline.side_effect = (
-            lambda vocabulary, feedback: f"outline {self.llm.generate_outline.call_count}"
+            lambda vocabulary, feedback: generate_text("outline")
         )
         self.llm.generate_storyboard.side_effect = (
-            lambda vocabulary, outline, feedback:
-            f"storyboard {self.llm.generate_storyboard.call_count}"
+            lambda vocabulary, outline, feedback: generate_text("storyboard")
         )
         self.text_safety = Mock(spec=TextSafetyAgent)
         self.text_safety.check.return_value = SafetyResult(True)
@@ -68,33 +76,39 @@ class PipelineTests(unittest.TestCase):
         result = self.workflow.run([" apple ", "pear"], self.output)
 
         words = ("apple", "pear")
+        quality_calls = self.text_quality.choose.call_args_list
+        self.assertEqual(len(quality_calls), 2)
+        outline_call, storyboard_call = quality_calls
+        self.assertEqual(outline_call.args[:2], ("outline", words))
+        self.assertEqual(storyboard_call.args[:2], ("storyboard", words))
+        outlines = outline_call.args[2]
+        storyboards = storyboard_call.args[2]
+        self.assertCountEqual(outlines, [f"outline {number}" for number in range(1, 5)])
+        self.assertCountEqual(storyboards, [f"storyboard {number}" for number in range(1, 5)])
+        chosen_outline = outlines[2]
+        chosen_storyboard = storyboards[1]
         self.assertEqual(self.llm.generate_outline.call_args_list, [call(words, None)] * 4)
         self.assertEqual(
             self.llm.generate_storyboard.call_args_list,
-            [call(words, "outline 3", None)] * 4,
+            [call(words, chosen_outline, None)] * 4,
         )
-        self.assertEqual(self.text_quality.choose.call_args_list, [
-            call("outline", words, ("outline 1", "outline 2", "outline 3", "outline 4")),
-            call("storyboard", words,
-                 ("storyboard 1", "storyboard 2", "storyboard 3", "storyboard 4")),
-        ])
         videos = tuple(
             self.output / "video_candidates" / f"candidate-{slot}-attempt-1.mp4"
             for slot in range(1, 5)
         )
-        self.assertEqual(
+        self.assertCountEqual(
             self.video.generate.call_args_list,
-            [call("storyboard 2", path) for path in videos],
+            [call(chosen_storyboard, path) for path in videos],
         )
-        self.video_quality.choose.assert_called_once_with("storyboard 2", videos)
+        self.video_quality.choose.assert_called_once_with(chosen_storyboard, videos)
         self.assertEqual(result.selected_video, videos[3])
         self.media.extract_audio.assert_called_once_with(videos[3], result.audio)
         self.speech_to_text.transcribe.assert_called_once_with(result.audio)
         self.media.burn_subtitles.assert_called_once_with(
             videos[3], result.subtitles, result.final_video,
         )
-        self.assertEqual(result.outline.read_text(), "outline 3")
-        self.assertEqual(result.storyboard.read_text(), "storyboard 2")
+        self.assertEqual(result.outline.read_text(), chosen_outline)
+        self.assertEqual(result.storyboard.read_text(), chosen_storyboard)
         self.assertEqual(json.loads((self.output / "vocabulary.json").read_text()), list(words))
         self.assertEqual(json.loads(result.transcript.read_text()), [
             {"start": 0.25, "end": 1.5, "text": "Hello, apple."},
@@ -108,6 +122,26 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(result.audio.read_bytes(), b"fake audio")
         self.assertEqual(result.final_video.read_bytes(), b"fake subtitled video")
 
+    def test_all_four_generations_overlap_in_each_stage(self):
+        for generator in (
+            self.llm.generate_outline, self.llm.generate_storyboard, self.video.generate,
+        ):
+            barrier = Barrier(4, timeout=5)
+            original = generator.side_effect
+
+            def concurrent_generate(*args, barrier=barrier, original=original):
+                barrier.wait()
+                return original(*args)
+
+            generator.side_effect = concurrent_generate
+
+        result = self.workflow.run(["apple"], self.output)
+
+        self.assertTrue(result.final_video.is_file())
+        self.assertEqual(self.llm.generate_outline.call_count, 4)
+        self.assertEqual(self.llm.generate_storyboard.call_count, 4)
+        self.assertEqual(self.video.generate.call_count, 4)
+
     def test_text_safety_feedback_reaches_only_the_retried_stage(self):
         self.text_safety.check.side_effect = (
             lambda stage, text: SafetyResult(text != "outline 1", "remove unsafe content")
@@ -115,14 +149,17 @@ class PipelineTests(unittest.TestCase):
 
         result = self.workflow.run(["apple"], self.output)
 
-        self.assertEqual(self.llm.generate_outline.call_args_list, [
-            call(("apple",), None), call(("apple",), "remove unsafe content"),
-            call(("apple",), None), call(("apple",), None), call(("apple",), None),
-        ])
-        self.assertEqual(result.outline.read_text(), "outline 4")
+        self.assertCountEqual(
+            self.llm.generate_outline.call_args_list,
+            [call(("apple",), None)] * 4 + [call(("apple",), "remove unsafe content")],
+        )
+        outlines = self.text_quality.choose.call_args_list[0].args[2]
+        self.assertCountEqual(outlines, [f"outline {number}" for number in range(2, 6)])
+        chosen_outline = outlines[2]
+        self.assertEqual(result.outline.read_text(), chosen_outline)
         self.assertEqual(
             self.llm.generate_storyboard.call_args_list,
-            [call(("apple",), "outline 4", None)] * 4,
+            [call(("apple",), chosen_outline, None)] * 4,
         )
 
     def test_unsafe_video_is_deleted_before_regeneration_without_feedback(self):
@@ -138,12 +175,12 @@ class PipelineTests(unittest.TestCase):
             lambda path: SafetyResult(path != rejected, "do not pass this reason to video")
         )
 
-        self.workflow.run(["apple"], self.output)
+        result = self.workflow.run(["apple"], self.output)
 
         self.assertFalse(rejected.exists())
         self.assertEqual(self.video.generate.call_count, 5)
         self.assertTrue(all(len(item.args) == 2 for item in self.video.generate.call_args_list))
-        self.assertTrue(all(item.args[0] == "storyboard 2"
+        self.assertTrue(all(item.args[0] == result.storyboard.read_text()
                             for item in self.video.generate.call_args_list))
         survivors = self.video_quality.choose.call_args.args[1]
         self.assertEqual(len(survivors), 4)

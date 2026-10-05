@@ -1,6 +1,7 @@
 """Tests for the workflow's bounded safety and quality decisions."""
 
 import unittest
+from threading import Barrier, Event, Lock
 from unittest.mock import Mock
 
 from vocagent.models import SafetyResult
@@ -22,7 +23,7 @@ class SelectionTests(unittest.TestCase):
         )
 
         self.assertEqual(result, "slot 3")
-        self.assertEqual(
+        self.assertCountEqual(
             generate.call_args_list,
             [((slot, 1, None),) for slot in range(1, 5)],
         )
@@ -49,12 +50,56 @@ class SelectionTests(unittest.TestCase):
         )
 
         self.assertEqual(result, (1, 3))
-        self.assertEqual(calls, [
+        self.assertEqual(sorted(calls), [
             (1, 1, None), (1, 2, "unsafe attempt 1"),
             (1, 3, "unsafe attempt 2"), (2, 1, None),
             (3, 1, None), (4, 1, None),
         ])
         judge.assert_called_once_with(((1, 3), (2, 1), (3, 1), (4, 1)))
+
+    def test_slots_generate_and_check_concurrently_with_ordered_survivors(self):
+        generation_barrier = Barrier(4, timeout=5)
+        safety_barrier = Barrier(4, timeout=5)
+        finished = {slot: Event() for slot in range(1, 5)}
+        calls = []
+        completion_order = []
+        lock = Lock()
+
+        def generate(slot, attempt, feedback):
+            with lock:
+                calls.append((slot, attempt, feedback))
+            if attempt == 1:
+                generation_barrier.wait()
+            return slot, attempt
+
+        def check(candidate):
+            slot, attempt = candidate
+            if attempt == 1:
+                safety_barrier.wait()
+            if attempt < slot:
+                return SafetyResult(False, f"slot {slot} attempt {attempt}")
+            if slot < 4:
+                self.assertTrue(finished[slot + 1].wait(timeout=5))
+            with lock:
+                completion_order.append(slot)
+            finished[slot].set()
+            return SafetyResult(True)
+
+        judge = Mock(return_value=1)
+        result = select_candidate(
+            stage="outline", generate=generate, check_safety=check,
+            choose_best=judge, pass_feedback=True,
+        )
+
+        self.assertEqual(result, (2, 2))
+        self.assertEqual(completion_order, [4, 3, 2, 1])
+        judge.assert_called_once_with(((1, 1), (2, 2), (3, 3), (4, 4)))
+        for slot in range(1, 5):
+            self.assertEqual(
+                [call for call in calls if call[0] == slot],
+                [(slot, attempt, None if attempt == 1 else f"slot {slot} attempt {attempt - 1}")
+                 for attempt in range(1, slot + 1)],
+            )
 
     def test_video_retries_never_receive_feedback(self):
         generate = Mock(side_effect=lambda slot, attempt, feedback: (slot, attempt))
@@ -102,7 +147,7 @@ class SelectionTests(unittest.TestCase):
 
         self.assertEqual(generate.call_count, 16)
         self.assertEqual(check.call_count, 16)
-        self.assertEqual(
+        self.assertCountEqual(
             [call.args[:2] for call in generate.call_args_list],
             [(slot, attempt) for slot in range(1, 5) for attempt in range(1, 5)],
         )
@@ -117,10 +162,12 @@ class SelectionTests(unittest.TestCase):
                     check_safety=lambda attempt: SafetyResult(attempt == 2, reason),
                     choose_best=lambda candidates: 0, pass_feedback=True,
                 )
-                feedback = generate.call_args_list[1].args[2]
-                self.assertIsInstance(feedback, str)
-                self.assertIn("safety", feedback)
-                self.assertIn("safer", feedback)
+                retries = [call.args for call in generate.call_args_list if call.args[1] == 2]
+                self.assertEqual(len(retries), 4)
+                for slot, attempt, feedback in retries:
+                    self.assertIsInstance(feedback, str)
+                    self.assertIn("safety", feedback)
+                    self.assertIn("safer", feedback)
 
     def test_quality_judge_index_must_be_a_plain_integer_in_range(self):
         class IntegerSubclass(int):
@@ -156,7 +203,7 @@ class SelectionTests(unittest.TestCase):
             )
 
         self.assertIs(caught.exception, error)
-        generate.assert_called_once_with(1, 1, None)
+        self.assert_first_attempts_only(generate)
         check.assert_not_called()
         judge.assert_not_called()
 
@@ -173,8 +220,8 @@ class SelectionTests(unittest.TestCase):
             )
 
         self.assertIs(caught.exception, error)
-        generate.assert_called_once_with(1, 1, None)
-        check.assert_called_once_with("candidate")
+        self.assert_first_attempts_only(generate)
+        self.assertEqual(check.call_args_list, [(("candidate",),)] * generate.call_count)
         judge.assert_not_called()
 
     def test_malformed_safety_results_stop_without_retry_or_quality_judging(self):
@@ -195,9 +242,17 @@ class SelectionTests(unittest.TestCase):
                         choose_best=judge, pass_feedback=True,
                     )
 
-                generate.assert_called_once_with(1, 1, None)
-                check.assert_called_once_with("candidate")
+                self.assert_first_attempts_only(generate)
+                self.assertEqual(check.call_args_list, [(("candidate",),)] * generate.call_count)
                 judge.assert_not_called()
+
+    def assert_first_attempts_only(self, generate):
+        calls = [call.args for call in generate.call_args_list]
+        self.assertGreaterEqual(len(calls), 1)
+        self.assertLessEqual(len(calls), 4)
+        self.assertEqual(len({slot for slot, attempt, feedback in calls}), len(calls))
+        self.assertTrue(all(attempt == 1 and feedback is None
+                            for slot, attempt, feedback in calls))
 
     def test_quality_errors_propagate_without_regeneration(self):
         error = RuntimeError("quality judge unavailable")

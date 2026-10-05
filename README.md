@@ -20,11 +20,12 @@ model API calls in the application.
 7. Write ASS subtitles using those timestamps.
 8. Burn the subtitles into the selected video with FFmpeg, preserving its audio.
 
-Each of the three generation stages fills four candidate slots sequentially.
-Each slot gets at most four generation/safety attempts. A safe candidate ends
-that slot's retries; an exhausted slot is ignored. The quality judge then picks
-from all safe candidates, even if only one survived. If none survived, the
-workflow raises `HumanInterventionRequired` and stops before the next stage.
+Each of the three generation stages fills four candidate slots concurrently,
+using up to four worker threads. Each slot gets at most four sequential
+generation/safety attempts. A safe candidate ends that slot's retries; an
+exhausted slot is ignored. Once all slots finish, the quality judge picks from
+the safe candidates in slot order, even if only one survived. If none survived,
+the workflow raises `HumanInterventionRequired` and stops before the next stage.
 
 For text, the preceding safety failure reason is passed to the next attempt in
 the same slot. Video safety failures cause the generated file to be deleted and
@@ -32,10 +33,12 @@ the slot retried without feedback. Generation, safety, and judging are separate
 dependencies. Supply separate agents for text generation, safety, and quality,
 and specialized models for video safety and quality.
 
-Provider and FFmpeg errors stop the run immediately; they are not silently
-classified as unsafe candidates or retried. Successful earlier artifacts remain
-available for inspection after a failure. After human intervention, start a new
-run in a new or empty directory; automatic resume is not implemented.
+Provider and FFmpeg errors stop the run; they are not silently classified as
+unsafe candidates or retried. A generation or safety error stops new attempts;
+already-started attempts finish before the error is raised. Successful earlier
+artifacts remain available for inspection after a failure. After human
+intervention, start a new run in a new or empty directory; automatic resume is
+not implemented.
 
 ## Connect providers
 
@@ -43,6 +46,9 @@ Implement the methods in
 [`vocagent/providers.py`](vocagent/providers.py).
 You can subclass the stubs or supply objects with matching methods. A video
 provider must write a nonempty video with an audio track to the requested path.
+Generation and safety providers must support up to four concurrent calls on the
+same instance. Each video attempt receives a distinct output path. Each stage's
+quality judge runs once after all slots finish; workflow stages remain sequential.
 Safety providers return `SafetyResult(safe=True)` or
 `SafetyResult(safe=False, reason="...")`. Quality providers return a zero-based
 index into the safe candidates passed to them. Speech-to-text returns

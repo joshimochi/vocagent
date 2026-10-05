@@ -1,6 +1,8 @@
 """Bounded safety retries followed by an independent quality decision."""
 
 from collections.abc import Callable, Sequence
+from concurrent.futures import ThreadPoolExecutor
+from threading import Event
 from typing import TypeVar
 
 from .models import SafetyResult
@@ -21,36 +23,52 @@ def select_candidate(
     choose_best: Callable[[Sequence[T]], int],
     pass_feedback: bool,
 ) -> T:
-    """Choose among four slots, each allowed at most four safety attempts.
+    """Choose among four concurrent slots, each with up to four safety attempts.
 
     The generator receives a one-based slot and attempt, plus the previous
     unsafe reason when feedback is enabled. The quality judge receives only
-    the safe survivors and returns a zero-based index into that sequence.
-    Provider exceptions propagate without being treated as safety failures.
+    the safe survivors in slot order and returns a zero-based index into that
+    sequence. Generation and safety callbacks must support concurrent calls.
+    Each slot's retries remain sequential. Provider exceptions stop new attempts
+    and propagate after in-flight work finishes, without becoming safety failures.
     """
-    accepted: list[T] = []
-    for slot in range(1, 5):
+    stopped = Event()
+
+    def generate_slot(slot: int) -> list[T]:
         feedback = None
-        for attempt in range(1, 5):
-            candidate = generate(slot, attempt, feedback)
-            safety = check_safety(candidate)
-            if (
-                not isinstance(safety, SafetyResult)
-                or type(safety.safe) is not bool
-                or not isinstance(safety.reason, str)
-            ):
-                raise ValueError(
-                    f"{stage}: the safety checker must return a SafetyResult "
-                    "with a boolean safe value and a string reason."
-                )
-            if safety.safe:
-                accepted.append(candidate)
-                break
-            if pass_feedback:
-                feedback = safety.reason if safety.reason.strip() else (
-                    "The previous candidate failed the safety check. "
-                    "Generate a safer alternative."
-                )
+        try:
+            for attempt in range(1, 5):
+                if stopped.is_set():
+                    return []
+                candidate = generate(slot, attempt, feedback)
+                safety = check_safety(candidate)
+                if (
+                    not isinstance(safety, SafetyResult)
+                    or type(safety.safe) is not bool
+                    or not isinstance(safety.reason, str)
+                ):
+                    raise ValueError(
+                        f"{stage}: the safety checker must return a SafetyResult "
+                        "with a boolean safe value and a string reason."
+                    )
+                if safety.safe:
+                    return [candidate]
+                if pass_feedback:
+                    feedback = safety.reason if safety.reason.strip() else (
+                        "The previous candidate failed the safety check. "
+                        "Generate a safer alternative."
+                    )
+        except Exception:
+            stopped.set()
+            raise
+        return []
+
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        accepted = [
+            candidate
+            for survivors in executor.map(generate_slot, range(1, 5))
+            for candidate in survivors
+        ]
 
     if not accepted:
         raise HumanInterventionRequired(
