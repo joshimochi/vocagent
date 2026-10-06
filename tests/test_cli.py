@@ -22,12 +22,12 @@ class CLITests(unittest.TestCase):
                 redirect_stderr(stderr), redirect_stdout(stdout):
             status = main(["apple", "--stop-after", "storyboard"])
 
-        load.assert_called_once_with("vocagent.qwen:create_providers")
+        load.assert_called_once_with("vocagent.local:create_providers")
         self.assertEqual(status, 1)
         self.assertIn("Workflow stopped: Configure the Qwen endpoints", stderr.getvalue())
         self.assertEqual(stdout.getvalue(), "")
 
-    def test_default_qwen_factory_stops_at_storyboard(self):
+    def test_local_factory_explicit_stop_at_storyboard(self):
         llm = Mock(spec=LLMGenerator)
         llm.generate_outline.return_value = "A story about an apple."
         llm.generate_storyboard.return_value = "Scene 1: An apple falls."
@@ -40,10 +40,10 @@ class CLITests(unittest.TestCase):
             stdout = io.StringIO()
             with patch("vocagent.__main__.load_providers", return_value=providers) as load, \
                     redirect_stdout(stdout):
-                status = main(["apple", "--output-dir", temporary])
+                status = main(["apple", "--output-dir", temporary, "--stop-after", "storyboard"])
 
             self.assertEqual(status, 0)
-            load.assert_called_once_with("vocagent.qwen:create_providers")
+            load.assert_called_once_with("vocagent.local:create_providers")
             output = Path(temporary)
             self.assertEqual(stdout.getvalue(), f"{output / 'storyboard.txt'}\n")
             self.assertEqual((output / "storyboard.txt").read_text(), "Scene 1: An apple falls.")
@@ -68,6 +68,35 @@ class CLITests(unittest.TestCase):
             ["apple"], Path("chosen"), stop_after="storyboard",
         )
         self.assertEqual(stdout.getvalue(), f"{result.storyboard}\n")
+
+    def test_default_local_factory_runs_full_video_and_releases_gpu_runtime(self):
+        providers = Providers()
+        providers.close = Mock()
+        final_path = Path("/tmp/local-final.mp4")
+        stdout = io.StringIO()
+        with patch("vocagent.__main__.load_providers", return_value=providers) as load, \
+                patch("vocagent.__main__.Workflow") as workflow, redirect_stdout(stdout):
+            workflow.return_value.run.return_value = SimpleNamespace(final_video=final_path)
+            status = main(["apple", "--output-dir", "chosen-output"])
+        self.assertEqual(status, 0)
+        load.assert_called_once_with("vocagent.local:create_providers")
+        workflow.return_value.run.assert_called_once_with(
+            ["apple"], Path("chosen-output"), stop_after="video",
+        )
+        providers.close.assert_called_once_with()
+        self.assertEqual(stdout.getvalue(), f"{final_path}\n")
+
+    def test_local_runtime_is_released_when_gpu_inference_fails(self):
+        providers = Providers()
+        providers.close = Mock()
+        stderr = io.StringIO()
+        with patch("vocagent.__main__.load_providers", return_value=providers), \
+                patch("vocagent.__main__.Workflow") as workflow, redirect_stderr(stderr):
+            workflow.return_value.run.side_effect = RuntimeError("GPU allocation failed")
+            status = main(["apple"])
+        self.assertEqual(status, 1)
+        self.assertIn("GPU allocation failed", stderr.getvalue())
+        providers.close.assert_called_once_with()
 
     def test_explicit_stop_stage_overrides_each_provider_default(self):
         for factory_args in ([], ["--providers", "example:build"]):

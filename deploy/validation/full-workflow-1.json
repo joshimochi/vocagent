@@ -1,0 +1,239 @@
+{
+  "verified_at_utc": "2026-10-06T07:36:39.124640+00:00",
+  "host": "hs",
+  "container": "vocagent-local-a406",
+  "physical_gpus": [
+    4,
+    5,
+    6,
+    7
+  ],
+  "command": "bash deploy/run_hs.sh curious discover --outline-candidate-count 1 --storyboard-candidate-count 1 --video-candidate-count 1 --output-dir /data/group6/vocagent/outputs/a406-full-workflow-1",
+  "settings": {
+    "width": 448,
+    "height": 256,
+    "seconds": 5,
+    "steps": 50
+  },
+  "exit_code": 0,
+  "cpu_offloading": false,
+  "scope": "Technical end-to-end integration passed with all requested full models. Vocabulary adherence failed: the markdown storyboard omitted the native H3 speech markup. The next validation uses explicit H3 fields, speaker IDs, dialogue tags and a tighter speaking budget.",
+  "remote_log": "/data/group6/vocagent/run-a406/full-workflow-1.log",
+  "remote_output": "/data/group6/vocagent/outputs/a406-full-workflow-1",
+  "transcript": [
+    {
+      "start": 2.96,
+      "end": 4.72,
+      "text": "History of some writings."
+    }
+  ],
+  "artifacts": {
+    "vocabulary.json": {
+      "bytes": 30,
+      "sha256": "26c5ec69dd58919b898dcd81a6771c88f8ed71255230b6c023eb38b07c38edaa"
+    },
+    "outline.txt": {
+      "bytes": 1390,
+      "sha256": "af13e8392215c4e2ed322a198cbe34bab3ff7673cb4e0ca13d2f9b55d6157790"
+    },
+    "storyboard.txt": {
+      "bytes": 1095,
+      "sha256": "b60795b9a3233d82da101913876db27bb24124787274df3c7b6b2e7d25e59014"
+    },
+    "audio.wav": {
+      "bytes": 165966,
+      "sha256": "6e6d523f7eb869919066fba22149a77749805cf258672f10da3a155c8252d266"
+    },
+    "transcript.json": {
+      "bytes": 88,
+      "sha256": "48379736f0b82aa54b2ca689f30dcaa365e7f387ca52739ebb34930823bca589"
+    },
+    "subtitles.ass": {
+      "bytes": 627,
+      "sha256": "792d1e197ca8ec1477e0133518c5d78e646219d4a9186c6126d74d161d67add4"
+    },
+    "final.mp4": {
+      "bytes": 599887,
+      "sha256": "084a483b0f7c37fd35015c836a9b6b134d1ac419414550c5c3618e6f4443dcea"
+    }
+  },
+  "ffprobe": {
+    "streams": [
+      {
+        "index": 0,
+        "codec_name": "h264",
+        "codec_long_name": "H.264 / AVC / MPEG-4 AVC / MPEG-4 part 10",
+        "profile": "High",
+        "codec_type": "video",
+        "codec_tag_string": "avc1",
+        "codec_tag": "0x31637661",
+        "width": 448,
+        "height": 256,
+        "coded_width": 448,
+        "coded_height": 256,
+        "closed_captions": 0,
+        "has_b_frames": 2,
+        "pix_fmt": "yuv420p",
+        "level": 21,
+        "chroma_location": "left",
+        "refs": 1,
+        "is_avc": "true",
+        "nal_length_size": "4",
+        "r_frame_rate": "24/1",
+        "avg_frame_rate": "24/1",
+        "time_base": "1/12288",
+        "start_pts": 0,
+        "start_time": "0.000000",
+        "duration_ts": 63488,
+        "duration": "5.166667",
+        "bit_rate": "791605",
+        "bits_per_raw_sample": "8",
+        "nb_frames": "124",
+        "disposition": {
+          "default": 1,
+          "dub": 0,
+          "original": 0,
+          "comment": 0,
+          "lyrics": 0,
+          "karaoke": 0,
+          "forced": 0,
+          "hearing_impaired": 0,
+          "visual_impaired": 0,
+          "clean_effects": 0,
+          "attached_pic": 0,
+          "timed_thumbnails": 0
+        },
+        "tags": {
+          "language": "und",
+          "handler_name": "VideoHandler",
+          "vendor_id": "[0][0][0][0]"
+        }
+      },
+      {
+        "index": 1,
+        "codec_name": "aac",
+        "codec_long_name": "AAC (Advanced Audio Coding)",
+        "profile": "LC",
+        "codec_type": "audio",
+        "codec_tag_string": "mp4a",
+        "codec_tag": "0x6134706d",
+        "sample_fmt": "fltp",
+        "sample_rate": "32000",
+        "channels": 2,
+        "channel_layout": "stereo",
+        "bits_per_sample": 0,
+        "r_frame_rate": "0/0",
+        "avg_frame_rate": "0/0",
+        "time_base": "1/32000",
+        "start_pts": 0,
+        "start_time": "0.000000",
+        "duration_ts": 165888,
+        "duration": "5.184000",
+        "bit_rate": "128498",
+        "nb_frames": "163",
+        "disposition": {
+          "default": 1,
+          "dub": 0,
+          "original": 0,
+          "comment": 0,
+          "lyrics": 0,
+          "karaoke": 0,
+          "forced": 0,
+          "hearing_impaired": 0,
+          "visual_impaired": 0,
+          "clean_effects": 0,
+          "attached_pic": 0,
+          "timed_thumbnails": 0
+        },
+        "tags": {
+          "language": "und",
+          "handler_name": "SoundHandler",
+          "vendor_id": "[0][0][0][0]"
+        }
+      }
+    ],
+    "format": {
+      "filename": "/data/group6/vocagent/outputs/a406-full-workflow-1/final.mp4",
+      "nb_streams": 2,
+      "nb_programs": 0,
+      "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+      "format_long_name": "QuickTime / MOV",
+      "start_time": "0.000000",
+      "duration": "5.184000",
+      "size": "599887",
+      "bit_rate": "925751",
+      "probe_score": 100,
+      "tags": {
+        "major_brand": "isom",
+        "minor_version": "512",
+        "compatible_brands": "isomiso2avc1mp41",
+        "encoder": "Lavf58.76.100"
+      }
+    }
+  },
+  "decoded_audio": {
+    "samples": 331776,
+    "finite": true,
+    "peak": 0.12496039271354675,
+    "rms": 0.014737478475420536
+  },
+  "model_events": [
+    "2026-10-06 15:14:03,311 Loading ('chat', '/data/group6/vocagent/models/Qwen3-VL-32B-Instruct', True) on GPU",
+    "2026-10-06 15:17:37,019 Unloading ('chat', '/data/group6/vocagent/models/Qwen3-VL-32B-Instruct', True)",
+    "2026-10-06 15:17:37,372 Loading ('chat', '/data/group6/vocagent/models/Qwen3Guard-Gen-8B', False) on GPU",
+    "2026-10-06 15:17:47,592 Unloading ('chat', '/data/group6/vocagent/models/Qwen3Guard-Gen-8B', False)",
+    "2026-10-06 15:17:47,855 Loading ('chat', '/data/group6/vocagent/models/Qwen3-VL-32B-Instruct', True) on GPU",
+    "2026-10-06 15:22:50,656 Unloading ('chat', '/data/group6/vocagent/models/Qwen3-VL-32B-Instruct', True)",
+    "2026-10-06 15:22:51,012 Loading ('chat', '/data/group6/vocagent/models/Qwen3Guard-Gen-8B', False) on GPU",
+    "2026-10-06 15:23:00,544 Unloading ('chat', '/data/group6/vocagent/models/Qwen3Guard-Gen-8B', False)",
+    "2026-10-06 15:23:00,834 Loading ('chat', '/data/group6/vocagent/models/Qwen3-VL-32B-Instruct', True) on GPU",
+    "2026-10-06 15:23:38,802 Unloading ('chat', '/data/group6/vocagent/models/Qwen3-VL-32B-Instruct', True)",
+    "2026-10-06 15:23:39,151 Loading ('isolated-h3', '/data/group6/minimax-h3/models/MiniMax-H3') on GPU",
+    "2026-10-06 15:23:39,209 H3 Loading ('minimax-h3', '/data/group6/minimax-h3/models/MiniMax-H3') on GPU",
+    "2026-10-06 15:32:16,828 H3 Unloading ('minimax-h3', '/data/group6/minimax-h3/models/MiniMax-H3')",
+    "2026-10-06 15:32:22,912 Unloading ('isolated-h3', '/data/group6/minimax-h3/models/MiniMax-H3')",
+    "2026-10-06 15:32:23,077 Loading ('qwen3-speech', '/data/group6/vocagent/models/Qwen3-ASR-1.7B', '/data/group6/vocagent/models/Qwen3-ForcedAligner-0.6B') on GPU",
+    "2026-10-06 15:32:33,621 Unloading ('qwen3-speech', '/data/group6/vocagent/models/Qwen3-ASR-1.7B', '/data/group6/vocagent/models/Qwen3-ForcedAligner-0.6B')",
+    "2026-10-06 15:32:34,006 Loading ('shieldgemma2', '/data/group6/vocagent/models/shieldgemma-2-4b-it') on GPU",
+    "2026-10-06 15:33:19,471 Unloading ('shieldgemma2', '/data/group6/vocagent/models/shieldgemma-2-4b-it')",
+    "2026-10-06 15:33:19,964 Loading ('chat', '/data/group6/vocagent/models/Qwen3Guard-Gen-8B', False) on GPU",
+    "2026-10-06 15:33:30,479 Unloading ('chat', '/data/group6/vocagent/models/Qwen3Guard-Gen-8B', False)",
+    "2026-10-06 15:33:30,855 Loading ('chat', '/data/group6/vocagent/models/Qwen3-VL-32B-Instruct', True) on GPU",
+    "2026-10-06 15:34:43,501 Unloading ('chat', '/data/group6/vocagent/models/Qwen3-VL-32B-Instruct', True)"
+  ],
+  "source_hashes": {
+    "vocagent/__init__.py": "3b45253b9946fe74a34a7ce920f7444084bf8ed7dc7ec81e0e69baaa322b6d91",
+    "vocagent/__main__.py": "f90742ff7966acf25c03a2c37ff04c3737ce0d8b86327922a88b23f147d7d66d",
+    "vocagent/gpu_boundaries.py": "431bada5b9081b8ab97542fa6d701cbcb4753206088cc8c70a1afc2d39f91912",
+    "vocagent/gpu_ops.py": "4cf1af665271d612d647fff21bc25f4d26e4a4ecea656f10c596ec0b58249a5c",
+    "vocagent/gpu_runtime.py": "c3b6ad0e637f29a14329aa53fba9ec5e3adc85cb771210ba21acddfa81d96566",
+    "vocagent/h3_probe.py": "3eecc22db67e8938954a9c2bc8856780e9f42c7d2a748819b37df85cc32eba9f",
+    "vocagent/h3_worker.py": "5b00753aeee188765cdd266f3b3da2345783e7b95954350267251ce4e12d94eb",
+    "vocagent/isolated_h3.py": "d4aac436990622167ec0c873332ef65b7a07df4bfb845c82665b82374dc29e76",
+    "vocagent/local.py": "d269cceb18bfcb61dbb49bf9ceb042ca4d153162bed2806ae698ec92e4082856",
+    "vocagent/local_chat.py": "efa7d3bfb863eb43199104275d9d6d836522a1291e4df0000842d9e39ada3224",
+    "vocagent/local_models.py": "d114d23eac5bbbb64c493e297cefb5236852f5123079bb519c5c4b40ec2f4394",
+    "vocagent/media.py": "43643a5096fb86f8263307a2606b5da698b356d95216937ffeab4d9658d1451b",
+    "vocagent/minimax.py": "560d7affe7e53fa86fc970c1dd57e8a0ac00dcbd84377274950d2e39709deea8",
+    "vocagent/models.py": "03cf00a5f5a29e46989584ef86d64ce40f153ee310491b65224a2cca032f3e45",
+    "vocagent/pipeline.py": "01ce807032a7ad13af86c923e24dc5967c1dd7014a3799592c596e7314b954fb",
+    "vocagent/providers.py": "256665180321c0541f09cbb658ea4c2128a7a5d28ccb0dc160c7346be0ebf804",
+    "vocagent/qwen.py": "55c4dcb648279e133427eb8fa1372dbba09101575095d50a0b66351e67691736",
+    "vocagent/selection.py": "a232a9a082748d3a4e29b2ccbf0427e903943c709a51d1673a537bdb7148f234",
+    "vocagent/subtitles.py": "716c991ab707a409d9ef82dd82036d7c0fd2e561cf934b70f07ba667b11138b0",
+    "vocagent/video_frames.py": "88a29a9519635cb6237318a53c67e84b4f9d9ee73f471e1a06921958b73a1388",
+    "vocagent/vl_probe.py": "1b88e9adc188d70354411169e5bcaeafce68e4f335f44db950b2d702a136019d"
+  },
+  "vocabulary_adherence": {
+    "passed": false,
+    "requested": [
+      "curious",
+      "discover"
+    ],
+    "recognized": "History of some writings.",
+    "missing": [
+      "curious",
+      "discover"
+    ]
+  }
+}

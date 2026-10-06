@@ -1,0 +1,115 @@
+{
+  "verified_at_utc": "2026-10-06T06:17:32.575089+00:00",
+  "host": "hs",
+  "container": "vocagent-local-a406",
+  "physical_gpus": [
+    4,
+    5,
+    6,
+    7
+  ],
+  "model": "/data/group6/minimax-h3/models/MiniMax-H3",
+  "environment": "/data/group6/vocagent/run-a406/h3-venv",
+  "settings": {
+    "width": 448,
+    "height": 256,
+    "seconds": 5,
+    "num_frames": 124,
+    "steps": 2
+  },
+  "result": {
+    "exit_code": 0,
+    "file": "/data/group6/vocagent/run-a406/h3-smoke-1.mp4",
+    "bytes": 650869,
+    "video": {
+      "codec": "h264",
+      "width": 448,
+      "height": 256,
+      "frames": 124,
+      "duration_seconds": 5.166667
+    },
+    "audio": {
+      "codec": "aac",
+      "sample_rate": 32000,
+      "channels": 2,
+      "duration_seconds": 5.175,
+      "decoded_float_samples": 331776,
+      "finite": true,
+      "peak_abs": 0.0752657875418663,
+      "rms": 0.009370986727680334
+    }
+  },
+  "weights": {
+    "text_encoder": {
+      "model": "Qwen3VLForConditionalGeneration",
+      "original_checkpoint": true,
+      "gpu_gib": {
+        "musa:0": 37.07,
+        "musa:1": 25.06
+      },
+      "attention": "sdpa"
+    },
+    "transformer": {
+      "model": "MiniMaxH3Transformer3DModel",
+      "original_checkpoint": true,
+      "gpu_gib": {
+        "musa:0": 0.11,
+        "musa:1": 14.66,
+        "musa:2": 38.48,
+        "musa:3": 8.47
+      },
+      "attention": "MUSA noncausal scaled_dot_product_attention with original QK normalization and RoPE"
+    },
+    "video_vae": {
+      "device": "musa:3",
+      "gib": 9.700167864561081,
+      "dtype": "float32",
+      "autocast": "float16"
+    },
+    "audio_vae": {
+      "device": "musa:3",
+      "gib": 0.5637164749205112,
+      "dtype": "float32"
+    },
+    "cpu_or_disk_offload": false,
+    "quantization": false
+  },
+  "elapsed_seconds": {
+    "vae_and_encoder_loading": 232.534,
+    "transformer_loading": 30.845,
+    "denoising_one_iteration": 36.44,
+    "load_through_output_and_unload_start": 338.713
+  },
+  "peak_gpu_memory": null,
+  "cleanup": {
+    "utc": "2026-10-06T06:13:51.256180+00:00",
+    "all_allocated_gpu_used_mib": 0
+  },
+  "logs": [
+    "/data/group6/vocagent/run-a406/h3-smoke-1.log",
+    "/data/group6/vocagent/run-a406/h3-smoke-1.telemetry.jsonl",
+    "/data/group6/vocagent/run-a406/h3-smoke-1.media.json",
+    "/data/group6/vocagent/run-a406/h3-smoke-1.audio.json"
+  ],
+  "scope": "Real full-size unquantized checkpoints generated video and native audio with every model parameter on MUSA and no weight offload. This two-sigma-point smoke validates integration; its audio contains no recognized speech and is rejected by production ASR. ShieldGemma2 passed at the production 2fps sampling rate. Native 1344x768/10-second peak capacity and 50-step production generation remain pending.",
+  "adapter_source_sha256": {
+    "vocagent/minimax.py": "07bd6537aefbfd7900cd8af2f7a7fb956c5168382f43031162c65a98cfa7ee63",
+    "vocagent/gpu_boundaries.py": "431bada5b9081b8ab97542fa6d701cbcb4753206088cc8c70a1afc2d39f91912"
+  },
+  "downstream_review": {
+    "exit_code": 1,
+    "log": "/data/group6/vocagent/run-a406/probe-h3-review.log",
+    "asr": {
+      "passed": false,
+      "result": "No recognized speech or aligned timestamps; rejected by production speech provider."
+    },
+    "shieldgemma_2": {
+      "passed": true,
+      "safe": true,
+      "sample_fps": 2,
+      "elapsed_seconds": 46.77,
+      "gpu_allocated_bytes": 8612223488,
+      "gpu_allocated_bytes_after_release": 0
+    }
+  }
+}

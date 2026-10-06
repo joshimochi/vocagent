@@ -1,6 +1,7 @@
 """Generate candidates, check visual and spoken safety, then subtitle the winner."""
 
 import json
+import logging
 import shutil
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -11,6 +12,10 @@ from .models import SafetyResult, StoryboardResult, TranscriptSegment, WorkflowR
 from .providers import Providers
 from .selection import select_candidate, validate_safety_result
 from .subtitles import validate_segments, write_ass
+from .vocabulary import missing_vocabulary
+
+
+log = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -61,6 +66,10 @@ class Workflow:
         if any(not isinstance(word, str) or not word.strip() for word in vocabulary):
             raise ValueError("Every vocabulary item must be a nonempty string.")
         words = tuple(word.strip() for word in vocabulary)
+        if stop_after == "video":
+            validator = getattr(self.providers.video_quality, "validate_candidate_count", None)
+            if callable(validator):
+                validator(self.video_candidate_count)
         output = Path(output_dir).resolve()
         if output.exists() and (not output.is_dir() or any(output.iterdir())):
             raise ValueError("Output directory must be new or empty to protect existing files.")
@@ -142,16 +151,37 @@ class Workflow:
                 "video audio",
             )
             if not visual.safe or not audio.safe:
+                log.warning(
+                    "Rejected %s: visual_safe=%s visual_reason=%r "
+                    "transcript_safe=%s transcript_reason=%r",
+                    candidate.video.name, visual.safe, visual.reason,
+                    audio.safe, audio.reason,
+                )
                 for path in (candidate.video, candidate.audio, candidate.transcript):
                     path.unlink()
                 return visual if not visual.safe else audio
             return SafetyResult(True)
+
+        def check_spoken_vocabulary(candidate: _VideoCandidate) -> str | None:
+            missing = missing_vocabulary(words, "\n".join(
+                segment.text for segment in candidate.segments
+            ))
+            if not missing:
+                return None
+            reason = "Recognized speech is missing requested vocabulary: " + ", ".join(
+                repr(word) for word in missing
+            )
+            log.warning("Rejected %s for content: %s", candidate.video.name, reason)
+            for path in (candidate.video, candidate.audio, candidate.transcript):
+                path.unlink()
+            return reason
 
         selected = select_candidate(
             stage="video",
             candidate_count=self.video_candidate_count,
             generate=generate_video,
             check_safety=check_video,
+            check_content=check_spoken_vocabulary,
             choose_best=lambda candidates: providers.video_quality.choose(
                 storyboard, tuple(candidate.video for candidate in candidates)
             ),

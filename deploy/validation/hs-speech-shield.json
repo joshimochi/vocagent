@@ -1,0 +1,99 @@
+{
+  "validated_on": "2026-10-06",
+  "host": "hs",
+  "container": "vocagent-inference",
+  "accelerator": {
+    "name": "MTT S4000",
+    "physical_gpu": 6,
+    "device_in_container": "musa:0",
+    "weight_dtype": "bfloat16"
+  },
+  "versions": {
+    "torch": "2.9.0",
+    "transformers": "4.57.6",
+    "qwen-asr": "0.0.6",
+    "accelerate": "1.12.0",
+    "huggingface-hub": "0.36.2",
+    "safetensors": "0.7.0",
+    "soundfile": "0.14.0"
+  },
+  "placement_validation": {
+    "all_model_parameters_on_musa": true,
+    "cpu_or_disk_weight_offload": false,
+    "method": "GPURuntime.assert_on_accelerator checked ASR, forced-aligner and ShieldGemma before inference.",
+    "checkpoint_loading": "CPU deserialization followed by a complete GPU transfer before inference; no CPU model inference.",
+    "kernel_adaptation": "Original convolution weights are evaluated with equivalent Tensor.unfold views and GPU matrix products.",
+    "shield_output_head": "Explicitly tied to trained input embeddings; parameter identity checked before GPU inference."
+  },
+  "speech": {
+    "status": "passed",
+    "exit_code": 0,
+    "models": ["Qwen/Qwen3-ASR-1.7B", "Qwen/Qwen3-ForcedAligner-0.6B"],
+    "input": "/data/group6/vocagent/run-a406/speech-fixture.wav",
+    "fixture_source": "Local FFmpeg flite English voice slt, converted to mono 16 kHz WAV.",
+    "expected_words": "Hello world The curious fox found an apple",
+    "actual_segments": [
+      {"start": 0.16, "end": 3.2, "text": "Hello, world! The curious fox found an apple."}
+    ],
+    "seconds_including_load": 31.7,
+    "gpu_allocated_bytes_after_inference": 5928035328,
+    "gpu_allocated_bytes_after_unload": 0,
+    "log": "/data/group6/vocagent/run-a406/probe-speech-fixture.log"
+  },
+  "video_safety": {
+    "status": "passed",
+    "model": "google/shieldgemma-2-4b-it",
+    "input": "/data/group6/vocagent/run-a406/video-probe.mp4",
+    "sample_fps_in_this_probe": 0.1,
+    "production_default_sample_fps": 2.0,
+    "policies": ["dangerous", "sexual", "violence"],
+    "violation_threshold": 0.5,
+    "result": {"safe": true, "reason": ""},
+    "seconds_including_load": 29.5,
+    "gpu_allocated_bytes_after_inference": 8612223488,
+    "gpu_allocated_bytes_after_unload": 0,
+    "log": "/data/group6/vocagent/run-a406/probe-speech.log",
+    "scope": "Sampled image classification; this probe does not establish temporal-event recall or audio safety."
+  },
+  "negative_speech_check": {
+    "input": "/data/group6/vocagent/run-a406/speech-probe.wav",
+    "result": "Existing H3 sample yielded no recognized speech/timestamps; the adapter rejected it instead of fabricating subtitles.",
+    "combined_probe_exit_code": 1,
+    "note": "The combined probe exited 1 for its empty-speech input; its subsequent ShieldGemma stage passed. The separate positive speech probe exited 0."
+  },
+  "automated_tests": {
+    "command": "python -m unittest tests.test_gpu_ops tests.test_local_models -v",
+    "passed": 15,
+    "skipped": 0,
+    "seconds": 4.215,
+    "coverage": "CPU numerical equivalence of Conv2d and isolated-patch Conv3d; model-loading contracts; alignment preservation; tied-head enforcement; fail-closed safety scores.",
+    "log": "/data/group6/vocagent/run-a406/probe-convolution-tests.log"
+  },
+  "old_services_read_only_inspection": [
+    {"name": "group6-qwen3-vl", "state": "exited", "restart_policy": "no"},
+    {
+      "name": "vocagent-qwen3-guard",
+      "state": "exited",
+      "restart_policy": "unless-stopped",
+      "note": "Explicitly stopped containers with this policy remain stopped across Docker/host restarts. No policy change was made."
+    }
+  ],
+  "sha256": {
+    "/data/group6/vocagent/run-a406/app/vocagent/local_models.py": "d114d23eac5bbbb64c493e297cefb5236852f5123079bb519c5c4b40ec2f4394",
+    "/data/group6/vocagent/run-a406/app/vocagent/gpu_ops.py": "4cf1af665271d612d647fff21bc25f4d26e4a4ecea656f10c596ec0b58249a5c",
+    "/data/group6/vocagent/run-a406/app/vocagent/gpu_runtime.py": "c3b6ad0e637f29a14329aa53fba9ec5e3adc85cb771210ba21acddfa81d96566",
+    "/data/group6/vocagent/run-a406/app/tests/test_local_models.py": "fc56a673f25dcbc4880971c0b063fc132cfaa4ca5e780e6001f75cb9ee59097a",
+    "/data/group6/vocagent/run-a406/app/tests/test_gpu_ops.py": "a3492d06012dc37c3245818f01f0c3cdacf31e99efec495849bc84530ef9601d",
+    "/data/group6/vocagent/run-a406/speech-fixture.wav": "0087b5894421df3f391a784ee4f513cc6e731b1a36b02facb1be0ee6e7c43224",
+    "/data/group6/vocagent/run-a406/video-probe.mp4": "97fc0b0426b718162f66003c2e12b2fe81d5e018eee757e6d0b9609038e6f28e",
+    "/data/group6/vocagent/run-a406/probe-speech.log": "1b3b7165e7cb8eec7a4819bbe1c8ef2e243f100faf6b0a92bfb5662ad614bf45",
+    "/data/group6/vocagent/run-a406/probe-speech-fixture.log": "801618c327e6b50a0a5f36a90ceec8eb65bc4233c5f33ec7789437671223b0b1",
+    "/data/group6/vocagent/run-a406/probe-convolution-tests.log": "caa8897f376c85e2cbf7b156d1149a3fd63c7977cf8705a4100f136a0f6eac04",
+    "/data/group6/vocagent/models/Qwen3-ASR-1.7B/config.json": "2e74a751548b8ad7d7526d29365ad8144c345d8b412b1152d25dc6698452712f",
+    "/data/group6/vocagent/models/Qwen3-ASR-1.7B/model.safetensors.index.json": "f994739fe38e5210b9e3e8ce6c6307315e2ceac3cb630e7b7414d69dce520f60",
+    "/data/group6/vocagent/models/Qwen3-ForcedAligner-0.6B/config.json": "d616c65d46c4b90bdc651b0a0963ea932732241140f337f9bb6b0335a9c8ef09",
+    "/data/group6/vocagent/models/shieldgemma-2-4b-it/config.json": "7c27d3c92c94e5f11fca865baa7bb84a4db5368128a0e7681886a84504cdb881",
+    "/data/group6/vocagent/models/shieldgemma-2-4b-it/model.safetensors.index.json": "a30b023618ff43eaf0c0dde0894078172ddbfe623d31f9da314915e9a4528c86"
+  },
+  "hash_scope": "Source, tests, fixtures, logs and model metadata; full model-weight shards were not rehashed during this validation."
+}

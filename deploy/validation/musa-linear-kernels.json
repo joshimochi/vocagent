@@ -1,0 +1,73 @@
+{
+  "verified_at_utc": "2026-10-06T06:28:32.496588+00:00",
+  "host": "hs",
+  "container": "vocagent-inference",
+  "physical_gpu": 6,
+  "torch": "2.9.0 MUSA",
+  "weight_and_input_dtype": "bfloat16",
+  "scope": "Synthetic matrix kernels only. CPU FP32 numerical oracles use random tensors, never real model inference. All nine results were finite and within expected BF16 rounding; this does not certify autoregressive KV-cache behavior.",
+  "results": [
+    {
+      "weight_shape": [
+        5120,
+        5120
+      ],
+      "input_rows": [
+        1,
+        2,
+        20
+      ],
+      "relative_rms_errors": [
+        0.0016570319,
+        0.0016733946,
+        0.0016547489
+      ],
+      "max_absolute_error_upper_bound": 0.015625,
+      "first_row_gpu_and_reference_argmax": 3218,
+      "first_row_equal_across_batch_sizes": true
+    },
+    {
+      "weight_shape": [
+        25600,
+        5120
+      ],
+      "input_rows": [
+        1,
+        2,
+        20
+      ],
+      "relative_rms_errors": [
+        0.0016401387,
+        0.0016465684,
+        0.0016533551
+      ],
+      "max_absolute_error_upper_bound": 0.0156518,
+      "first_row_gpu_and_reference_argmax": 22458,
+      "first_row_equal_across_batch_sizes": true
+    },
+    {
+      "weight_shape": [
+        151936,
+        5120
+      ],
+      "input_rows": [
+        1,
+        2,
+        20
+      ],
+      "relative_rms_errors": [
+        0.0016537168,
+        0.0016554182,
+        0.0016557614
+      ],
+      "max_absolute_error_upper_bound": 0.0156546,
+      "first_row_gpu_and_reference_argmax": 64495,
+      "first_row_equal_across_batch_sizes": true
+    }
+  ],
+  "gpu_allocated_bytes_after_cleanup": 0,
+  "exit_code": 0,
+  "log": "/data/group6/vocagent/run-a406/probe-musa-linear.log",
+  "probe_source": "/data/group6/vocagent/run-a406/probe-musa-linear.py",
+  "probe_source_sha256": "0b5a52a8e8c358c600aac55587798d5a897dbebdca793860cfdb2ee35d3154a0"
+}

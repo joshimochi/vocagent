@@ -1,7 +1,8 @@
-"""Command-line entry point with Qwen text providers and optional custom providers."""
+"""Command-line entry point for the complete GPU-only local workflow."""
 
 import argparse
 import importlib
+import logging
 import sys
 from pathlib import Path
 
@@ -11,7 +12,8 @@ from .providers import Providers
 from .selection import HumanInterventionRequired
 
 
-DEFAULT_PROVIDER_FACTORY = "vocagent.qwen:create_providers"
+DEFAULT_PROVIDER_FACTORY = "vocagent.local:create_providers"
+LEGACY_TEXT_FACTORY = "vocagent.qwen:create_providers"
 
 
 def positive_integer(value: str) -> int:
@@ -44,10 +46,9 @@ def main(argv: list[str] | None = None) -> int:
                         help="New or empty output directory (default: output)")
     parser.add_argument("--providers", metavar="MODULE:FACTORY",
                         default=DEFAULT_PROVIDER_FACTORY,
-                        help="Provider factory (default: vocagent.qwen:create_providers)")
+                        help="Provider factory (default: vocagent.local:create_providers)")
     parser.add_argument("--stop-after", choices=("storyboard", "video"),
-                        help="Last stage to run (default: storyboard for built-in Qwen providers; "
-                             "video for custom providers)")
+                        help="Last stage to run (default: video; legacy HTTP Qwen factory: storyboard)")
     parser.add_argument("--outline-candidate-count", type=positive_integer, default=2,
                         help="Number of outline candidate slots (default: 2)")
     parser.add_argument("--storyboard-candidate-count", type=positive_integer, default=2,
@@ -58,8 +59,10 @@ def main(argv: list[str] | None = None) -> int:
                         help="Generate candidate slots concurrently (default: sequential)")
     args = parser.parse_args(argv)
     stop_after = args.stop_after or (
-        "storyboard" if args.providers == DEFAULT_PROVIDER_FACTORY else "video"
+        "storyboard" if args.providers == LEGACY_TEXT_FACTORY else "video"
     )
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
+    providers = None
     try:
         providers = load_providers(args.providers)
         result = Workflow(
@@ -76,6 +79,9 @@ def main(argv: list[str] | None = None) -> int:
             ImportError, AttributeError) as exc:
         print(f"Workflow stopped: {exc}", file=sys.stderr)
         return 1
+    finally:
+        if providers is not None and callable(getattr(providers, "close", None)):
+            providers.close()
     print(result.storyboard if isinstance(result, StoryboardResult) else result.final_video)
     return 0
 

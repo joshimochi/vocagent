@@ -386,10 +386,10 @@ class PipelineTests(unittest.TestCase):
 
         self.video.generate.side_effect = generate
         self.speech_to_text.transcribe.side_effect = lambda path: [
-            TranscriptSegment(0, 1, path.stem),
+            TranscriptSegment(0, 1, path.stem + " apple"),
         ]
         self.audio_safety.check.side_effect = lambda text: SafetyResult(
-            text != rejected.stem, "do not forward this feedback to generation",
+            text != rejected.stem + " apple", "do not forward this feedback to generation",
         )
 
         result = self.workflow.run(["apple"], self.output)
@@ -407,6 +407,60 @@ class PipelineTests(unittest.TestCase):
             self.assertEqual(generated.args[0], result.storyboard.read_text())
         for suffix in (".mp4", ".wav", ".json"):
             self.assertFalse(rejected.with_suffix(suffix).exists())
+
+    def test_safe_speech_missing_vocabulary_is_deleted_and_regenerated_before_selection(self):
+        rejected = self.output / "video_candidates" / "candidate-1-attempt-1.mp4"
+        self.speech_to_text.transcribe.side_effect = lambda audio: [
+            TranscriptSegment(0, 1, "A pineapple." if audio.stem == rejected.stem else "An apple."),
+        ]
+
+        def generate(storyboard, output_path):
+            if output_path.name == "candidate-1-attempt-2.mp4":
+                for suffix in (".mp4", ".wav", ".json"):
+                    self.assertFalse(rejected.with_suffix(suffix).exists())
+            output_path.write_bytes(b"fake video")
+
+        self.video.generate.side_effect = generate
+        result = self.workflow.run(["apple"], self.output)
+
+        self.assertEqual(self.video.generate.call_count, 3)
+        self.assertEqual(self.video_safety.check.call_count, 3)
+        self.assertEqual(self.audio_safety.check.call_count, 3)
+        self.assertEqual(self.audio_safety.check.call_args_list[0], call("A pineapple."))
+        self.assertEqual([path.name for path in self.video_quality.choose.call_args.args[1]], [
+            "candidate-1-attempt-2.mp4", "candidate-2-attempt-1.mp4",
+        ])
+        self.assertEqual(json.loads(result.transcript.read_text())[0]["text"], "An apple.")
+
+    def test_unrelated_safe_speech_never_publishes_a_successful_video(self):
+        self.speech_to_text.transcribe.return_value = [
+            TranscriptSegment(0, 1, "History of some writings."),
+        ]
+        with self.assertRaisesRegex(HumanInterventionRequired, "video.*four attempts"):
+            self.workflow.run(["curious", "discover"], self.output)
+        self.assertEqual(self.video.generate.call_count, 8)
+        self.assertEqual(self.video_safety.check.call_count, 8)
+        self.assertEqual(self.audio_safety.check.call_count, 8)
+        self.assertEqual(list((self.output / "video_candidates").iterdir()), [])
+        self.video_quality.choose.assert_not_called()
+        self.media.burn_subtitles.assert_not_called()
+        for name in ("audio.wav", "transcript.json", "subtitles.ass", "final.mp4"):
+            self.assertFalse((self.output / name).exists())
+
+    def test_video_capacity_preflight_fails_before_creating_outputs_or_loading_models(self):
+        self.video_quality.validate_candidate_count = Mock(side_effect=ValueError("too many videos"))
+        with self.assertRaisesRegex(ValueError, "too many videos"):
+            self.workflow.run(["apple"], self.output)
+        self.video_quality.validate_candidate_count.assert_called_once_with(2)
+        self.assertFalse(self.output.exists())
+        self.llm.generate_outline.assert_not_called()
+        self.video.generate.assert_not_called()
+
+    def test_storyboard_only_does_not_require_video_capacity(self):
+        self.video_quality.validate_candidate_count = Mock(side_effect=ValueError("too many videos"))
+        result = self.workflow.run(["apple"], self.output, stop_after="storyboard")
+        self.assertIsInstance(result, StoryboardResult)
+        self.video_quality.validate_candidate_count.assert_not_called()
 
     def test_winner_reuses_its_own_audio_and_original_transcript_for_subtitles(self):
         def extract(video, audio):
@@ -462,12 +516,12 @@ class PipelineTests(unittest.TestCase):
         def transcribe(audio):
             transcribe_barrier.wait()
             self.assertEqual(audio.read_text(), audio.stem)
-            return [TranscriptSegment(0.25, 1.5, f"Spoken by {audio.stem}.")]
+            return [TranscriptSegment(0.25, 1.5, f"Spoken by {audio.stem}: apple.")]
 
         def check_visual(video):
             visual_barrier.wait()
             transcript = json.loads(video.with_suffix(".json").read_text())
-            self.assertEqual(transcript[0]["text"], f"Spoken by {video.stem}.")
+            self.assertEqual(transcript[0]["text"], f"Spoken by {video.stem}: apple.")
             return SafetyResult(True)
 
         def check_audio(text):
@@ -489,7 +543,7 @@ class PipelineTests(unittest.TestCase):
         result = workflow.run(["apple"], self.output)
 
         self.assertEqual(completed, [
-            "Spoken by candidate-2-attempt-1.", "Spoken by candidate-1-attempt-1.",
+            "Spoken by candidate-2-attempt-1: apple.", "Spoken by candidate-1-attempt-1: apple.",
         ])
         survivors = self.video_quality.choose.call_args.args[1]
         self.assertEqual([video.name for video in survivors], [
@@ -497,7 +551,7 @@ class PipelineTests(unittest.TestCase):
         ])
         self.assertEqual(self.speech_to_text.transcribe.call_count, 2)
         self.assertEqual(result.audio.read_text(), "candidate-2-attempt-1")
-        self.assertIn("Spoken by candidate-2-attempt-1.", result.subtitles.read_text())
+        self.assertIn("Spoken by candidate-2-attempt-1: apple.", result.subtitles.read_text())
         self.assertNotIn("candidate-1-attempt-1", result.subtitles.read_text())
 
     def test_all_unsafe_outline_stops_before_storyboard(self):

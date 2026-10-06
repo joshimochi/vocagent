@@ -1,0 +1,261 @@
+{
+  "schema_version": 1,
+  "host": "hs",
+  "physical_gpus": [
+    4,
+    7
+  ],
+  "model": "Qwen/Qwen3-VL-32B-Instruct",
+  "weight_dtype": "bfloat16",
+  "model_offloading": false,
+  "verified_configuration": {
+    "attention": "sdpa",
+    "use_cache": false,
+    "min_pixels": 65536,
+    "max_pixels": 262144,
+    "max_context": 16384,
+    "video_frames_per_candidate": 16
+  },
+  "notes": [
+    "Cached decoding failed known-answer and text-selection checks on the deployed MUSA/Transformers4.57.6 stack; the underlying cause remains unproven.",
+    "The production no-cache setting matches the successful explicit --no-cache diagnostic override. Weights remain GPU-resident; each prefix is recomputed.",
+    "The model processor needed explicit size plus min_pixels/max_pixels settings; max_pixels alone did not enforce the cap.",
+    "Video selection used the real H3-generated h3-smoke-1.mp4 twice. It verifies multi-frame model execution, context capacity and valid selection output, not ranking distinct video quality.",
+    "These checks do not measure long-form outline/storyboard generation latency or replace the full workflow run."
+  ],
+  "runs": [
+    {
+      "remote_report": "/data/group6/vocagent/run-a406/vl-probe-sdpa-1.json",
+      "report_sha256": "5971ee5a7226c6156ef0e656d822c7626e096fea00983931a68ce0fb9e564bd8",
+      "started_at": "2026-10-06T06:16:47.046029+00:00",
+      "completed_at": "2026-10-06T06:18:17.588106+00:00",
+      "attention": "sdpa",
+      "versions": {
+        "torch": "2.9.0",
+        "transformers": "4.57.6",
+        "accelerate": "1.12.0"
+      },
+      "image_processor": {
+        "size": {
+          "longest_edge": 16777216,
+          "shortest_edge": 65536
+        },
+        "min_pixels": null,
+        "max_pixels": 262144,
+        "patch_size": 16,
+        "temporal_patch_size": 2,
+        "merge_size": 2
+      },
+      "cases": [
+        {
+          "name": "short_text",
+          "status": "failed",
+          "seconds": 84.012,
+          "input_tokens": 20,
+          "generated_tokens": 32,
+          "output_prefix": "44444444444444444444444444444444",
+          "use_cache": true,
+          "error": "QwenError: Local completion did not reach EOS; truncated output is rejected. {\"generated_tokens\": 32, \"max_tokens\": 32, \"eos_token_ids\": [151645, 151643], \"tail_token_ids\": [19, 19, 19, 19, 19, 19, 19, 19], \"output_prefix\": \"44444444444444444444444444444444\"}"
+        },
+        {
+          "name": "text_selection",
+          "status": "failed",
+          "seconds": 0.54,
+          "input_tokens": 142,
+          "generated_tokens": 2,
+          "output_prefix": "{\"<|endoftext|>",
+          "use_cache": true,
+          "error": "QwenError: Qwen quality judge must return JSON with one integer index."
+        },
+        {
+          "name": "video_selection",
+          "status": "passed",
+          "result": 0,
+          "seconds": 5.612,
+          "input_tokens": 2938,
+          "generated_tokens": 7,
+          "output_prefix": "{\"index\": 0}<|im_end|>",
+          "use_cache": true,
+          "image_count": 8,
+          "max_processed_pixels": 344064
+        }
+      ]
+    },
+    {
+      "remote_report": "/data/group6/vocagent/run-a406/vl-probe-eager-1.json",
+      "report_sha256": "d040e552ae3b8daff1efdf98b160b3f5cb3baafa429b29de05038a2c0f6d370f",
+      "started_at": "2026-10-06T06:19:23.550451+00:00",
+      "completed_at": "2026-10-06T06:21:17.492575+00:00",
+      "attention": "eager",
+      "versions": {
+        "torch": "2.9.0",
+        "transformers": "4.57.6",
+        "accelerate": "1.12.0"
+      },
+      "image_processor": {
+        "size": {
+          "longest_edge": 16777216,
+          "shortest_edge": 65536
+        },
+        "min_pixels": null,
+        "max_pixels": 262144,
+        "patch_size": 16,
+        "temporal_patch_size": 2,
+        "merge_size": 2
+      },
+      "cases": [
+        {
+          "name": "short_text",
+          "status": "passed",
+          "result": "4",
+          "expected_result": "4",
+          "seconds": 81.665,
+          "input_tokens": 20,
+          "generated_tokens": 2,
+          "output_prefix": "4<|im_end|>",
+          "use_cache": true
+        },
+        {
+          "name": "text_selection",
+          "status": "failed",
+          "seconds": 24.216,
+          "input_tokens": 142,
+          "generated_tokens": 128,
+          "output_prefix": "{\"  \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" ",
+          "use_cache": true,
+          "error": "QwenError: Local completion did not reach EOS; truncated output is rejected. {\"generated_tokens\": 128, \"max_tokens\": 128, \"eos_token_ids\": [151645, 151643], \"tail_token_ids\": [330, 330, 330, 330, 330, 330, 330, 330], \"output_prefix\": \"{\\\"  \\\" \\\" \\\" \\\" \\\" \\\" \\\" \\\" \\\" \\\" \\\" \\\" \\\" \\\" \\\" \\\" \\\" \\\" \\\" \\\" \\\" \\\" \\\" \\\" \\\" \\\" \\\" \\\" \\\" \\\" \\\" \\\" \\\" \\\" \\\" \\\" \\\" \\\" \\\" \\\" \\\" \\\" \\\" \\\" \\\" \\\" \\\" \\\" \\\" \\\" \\\" \\\" \\\" \\\" \\\" \\\" \\\" \\\" \\\" \\\" \\\" \\\" \\\" \\\" \\\" \\\" \\\" \\\" \\\" \\\" \\\" \\\" \\\" \\\" \\\" \\\" \\\" \\\" \\\" \\\" \\\" \\\" \\\" \\\" \\\" \\\" \\\""
+        },
+        {
+          "name": "video_selection",
+          "status": "passed",
+          "result": 0,
+          "seconds": 7.688,
+          "input_tokens": 2938,
+          "generated_tokens": 7,
+          "output_prefix": "{\"index\": 0}<|im_end|>",
+          "use_cache": true,
+          "image_count": 8,
+          "max_processed_pixels": 344064
+        }
+      ]
+    },
+    {
+      "remote_report": "/data/group6/vocagent/run-a406/vl-probe-eager-no-cache-1.json",
+      "report_sha256": "4a246d7e7f3b6dd4f1159c79d7189bcb404ecf7eb5289c7aec8fc44b9b6711ba",
+      "started_at": "2026-10-06T06:22:32.578716+00:00",
+      "completed_at": "2026-10-06T06:24:11.409928+00:00",
+      "attention": "eager",
+      "versions": {
+        "torch": "2.9.0",
+        "transformers": "4.57.6",
+        "accelerate": "1.12.0"
+      },
+      "image_processor": {
+        "size": {
+          "longest_edge": 16777216,
+          "shortest_edge": 65536
+        },
+        "min_pixels": null,
+        "max_pixels": 262144,
+        "patch_size": 16,
+        "temporal_patch_size": 2,
+        "merge_size": 2
+      },
+      "cases": [
+        {
+          "name": "short_text",
+          "status": "passed",
+          "result": "4",
+          "expected_result": "4",
+          "seconds": 80.15,
+          "input_tokens": 20,
+          "generated_tokens": 2,
+          "output_prefix": "4<|im_end|>",
+          "use_cache": false
+        },
+        {
+          "name": "text_selection",
+          "status": "passed",
+          "result": 0,
+          "expected_result": 0,
+          "seconds": 2.623,
+          "input_tokens": 142,
+          "generated_tokens": 7,
+          "output_prefix": "{\"index\": 0}<|im_end|>",
+          "use_cache": false
+        },
+        {
+          "name": "video_selection",
+          "status": "failed",
+          "seconds": 15.656,
+          "input_tokens": 2938,
+          "generated_tokens": null,
+          "output_prefix": "",
+          "use_cache": false,
+          "error": "OutOfMemoryError: MUSA out of memory. Tried to allocate 2.06 GiB. GPU 0 has a total capacity of 47.91 GiB of which 1.07 GiB is free. Of the allocated memory 40.59 GiB is allocated by PyTorch, and 3.17 GiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_MUSA_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/musa.html#environment-variables)",
+          "image_count": 8,
+          "max_processed_pixels": 344064
+        }
+      ]
+    },
+    {
+      "remote_report": "/data/group6/vocagent/run-a406/vl-probe-sdpa-no-cache-32frames-1.json",
+      "report_sha256": "3d23be0d9e28ed015c85c1158a668e75b7c614f3e90842bcaf2c8668fb83ec0e",
+      "started_at": "2026-10-06T06:28:17.514972+00:00",
+      "completed_at": "2026-10-06T06:30:54.960425+00:00",
+      "attention": "sdpa",
+      "versions": {
+        "torch": "2.9.0",
+        "transformers": "4.57.6",
+        "accelerate": "1.12.0"
+      },
+      "image_processor": {
+        "size": {
+          "shortest_edge": 65536,
+          "longest_edge": 262144
+        },
+        "min_pixels": 65536,
+        "max_pixels": 262144,
+        "patch_size": 16,
+        "temporal_patch_size": 2,
+        "merge_size": 2
+      },
+      "cases": [
+        {
+          "name": "short_text",
+          "status": "passed",
+          "result": "4",
+          "expected_result": "4",
+          "seconds": 77.33,
+          "input_tokens": 20,
+          "generated_tokens": 2,
+          "output_prefix": "4<|im_end|>",
+          "use_cache": false
+        },
+        {
+          "name": "text_selection",
+          "status": "passed",
+          "result": 0,
+          "expected_result": 0,
+          "seconds": 2.478,
+          "input_tokens": 142,
+          "generated_tokens": 7,
+          "output_prefix": "{\"index\": 0}<|im_end|>",
+          "use_cache": false
+        },
+        {
+          "name": "video_selection",
+          "status": "passed",
+          "result": 0,
+          "seconds": 77.272,
+          "input_tokens": 8676,
+          "generated_tokens": 7,
+          "output_prefix": "{\"index\": 0}<|im_end|>",
+          "use_cache": false,
+          "image_count": 32,
+          "max_processed_pixels": 258048
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,57 @@
+{
+  "updated_at_utc": "2026-10-06T09:55:08.194247+00:00",
+  "host": "hs",
+  "status": "remote_state_unverified_during_connectivity_outage",
+  "supervisor_pid": 771297,
+  "remote_log": "/data/group6/vocagent/run-a406/full-workflow-3.log",
+  "remote_exit_marker": "/data/group6/vocagent/run-a406/full-workflow-3.exit",
+  "remote_output": "/data/group6/vocagent/outputs/a406-full-workflow-3",
+  "settings": {
+    "width": 1344,
+    "height": 768,
+    "seconds": 5,
+    "steps": 50,
+    "worker_timeout_seconds": 14400
+  },
+  "last_confirmed_at_utc": "2026-10-06T09:02:49+00:00",
+  "last_confirmed_denoising_progress": {
+    "attempt": 1,
+    "completed_iterations": 49,
+    "total_iterations": 49,
+    "elapsed": "44:17"
+  },
+  "selected_speech": "I\u2019m so curious\u2026 I can\u2019t wait to discover where this leads!",
+  "completed_stages": [
+    "outline generation",
+    "outline Guard safety",
+    "outline selection",
+    "native-format storyboard generation",
+    "storyboard format validation",
+    "storyboard Guard safety",
+    "storyboard selection",
+    "all full H3 weights loaded on GPU",
+    "first native-resolution H3 render and decode",
+    "first candidate ASR and forced alignment",
+    "first candidate visual and transcript safety review"
+  ],
+  "pending_verification": [
+    "safe native-resolution candidate",
+    "video selection",
+    "subtitle rendering",
+    "spoken vocabulary coverage"
+  ],
+  "network_evidence": "Bastion lab_1 is reachable. TCP connections from lab_1 to hs (10.123.0.40:22) time out; worker00040 has no alternate DNS address on the bastion. Last confirmed remote event remains second H3 attempt starting at 09:02:49 UTC.",
+  "note": "First native-resolution clip failed at least one safety check and was deleted. The existing bounded retry started its second H3 generation at 09:02:49 UTC. Final acceptance and vocabulary coverage remain unverified.",
+  "first_video_attempt": {
+    "render_completed": true,
+    "safety_accepted": false,
+    "rejection_reason": "Not captured by the running version; new rejection logging added for subsequent launches.",
+    "artifacts_deleted": true
+  },
+  "pending_deployment": [
+    "safety rejection logs",
+    "actual-transcript vocabulary coverage with bounded content retries",
+    "early local video selection capacity check"
+  ],
+  "final_deployment_attempt": "Failed during SSH banner exchange at approximately 09:54 UTC; final source updates were not installed."
+}

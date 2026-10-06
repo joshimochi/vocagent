@@ -1,0 +1,52 @@
+{
+  "verified_at_utc": "2026-10-06T05:59:57.476146+00:00",
+  "host": "hs",
+  "container": "group6-minimax-h3",
+  "device": "physical GPU 5 / musa:1",
+  "torch": "2.9.0 MUSA",
+  "diffusers": "0.40.0",
+  "regression_tests": {
+    "command": "OMP_NUM_THREADS=2 python -m unittest discover -s tests -p test_minimax.py -v",
+    "run": 7,
+    "passed": 7,
+    "skipped": 0,
+    "audio_convolution_comparisons": 48,
+    "audio_resampler_comparisons": 4,
+    "pointwise_conv3d_comparisons": 2
+  },
+  "audio": {
+    "weights_dtype": "float32",
+    "weight_gib": 0.5637164749205112,
+    "output_shape": [
+      2,
+      1,
+      165600
+    ],
+    "seconds": 21.326,
+    "finite": true,
+    "exit_code": 0,
+    "log": "/data/group6/vocagent/run-a406/h3-probe-audio.log"
+  },
+  "scope": "Both real full VAEs decoded synthetic latents entirely on MUSA. Subsequent complete H3 generation verification is recorded in h3-full-gpu.json. CPU tensors are used only as numerical test oracles, not for real inference.",
+  "sha256": {
+    "vocagent/minimax.py": "dee821f66f97f5ad11303c4eec20b21be432e9b09d3c25367fb6993baa4be916",
+    "vocagent/h3_probe.py": "3eecc22db67e8938954a9c2bc8856780e9f42c7d2a748819b37df85cc32eba9f",
+    "tests/test_minimax.py": "cca7a0fec88eb0cb42724b7225bdbfd4efa798548a209fabafe615c29dc84b47"
+  },
+  "video": {
+    "weights_dtype": "float32",
+    "autocast_dtype": "float16",
+    "weight_gib": 9.700167864561081,
+    "output_shape": [
+      1,
+      3,
+      124,
+      64,
+      64
+    ],
+    "seconds": 24.683,
+    "finite": true,
+    "exit_code": 0,
+    "log": "/data/group6/vocagent/run-a406/h3-probe-video.log"
+  }
+}

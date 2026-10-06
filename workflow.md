@@ -7,27 +7,45 @@
    - Validate the segments and save the audio and transcript beside the video.
    - Check visuals with `VideoSafetyModel` and spoken content with a separate
      `AudioSafetyModel`, passing the segment texts joined with newlines.
-   - Keep the candidate only when both safety models pass.
+   - After both safety models pass, require every requested word or phrase in the
+     actual recognized speech, using normalized complete words/phrases.
+   - Keep the candidate only when both safety and spoken-vocabulary checks pass.
 5. Choose the best safe video with `VideoQualityModel`.
 6. Copy the selected candidate's existing audio and transcript to `audio.wav`
    and `transcript.json`, and create ASS subtitles from its original segments.
 7. Burn the subtitles into the selected video with FFmpeg.
 
-The built-in text implementation uses Qwen3 for generation and quality judging,
-and Qwen3Guard for response safety. The CLI defaults to finishing after step 3
-with these built-in providers. Custom provider factories default to the full
-video workflow; `--stop-after` overrides either CLI default. Python callers use
-`Workflow.run(..., stop_after="storyboard")` to finish after step 3 with the
-selected outline and storyboard. The Python API still defaults to the full
-video workflow. Video and speech providers remain unimplemented.
+The default local implementation uses Qwen3-VL-32B for text generation, text
+selection, and sampled-frame video selection; Qwen3Guard-Gen-8B for text and
+complete recognized-transcript safety; MiniMax H3 for native audio/video;
+Qwen3-ASR-1.7B plus ForcedAligner-0.6B for timestamped speech; and ShieldGemma2
+4B for sampled-frame visual safety. The CLI and Python API default to the full
+video workflow. `--stop-after storyboard` or `stop_after="storyboard"` stops after
+selected text artifacts. The legacy HTTP Qwen factory remains available and
+retains its storyboard-only CLI default.
+
+Local storyboards use H3's native fields, speaker IDs and language-tagged
+dialogue, with a speaking budget based on clip duration. A malformed native
+format gets at most one repair request to the same Qwen model. The final prompt
+must pass format validation before the separate Guard check and H3 generation.
+
+The local runtime serializes GPU inference and evicts the previous model family
+before loading its replacement. It rejects CPU/disk offloading. H3 runs in a
+separate dependency environment after the parent releases its model weights.
+ShieldGemma is an image classifier applied at 2fps, including the clip tail;
+sampled-frame checks do not guarantee observation of brief events between frames.
+Model/runtime checks passed on hs; final spoken-vocabulary validation is in
+progress. See deploy/README.md for the live deployment status.
 
 For the outline, storyboard, and video stages, fill the configured number of
-candidate slots with generation/safety attempts, then let a separate quality
+candidate slots with generation/safety/content attempts, then let a separate quality
 judge choose from the safe candidates in slot order, even if only one survived.
 
 Configure the stages independently with `outline_candidate_count`,
 `storyboard_candidate_count`, and `video_candidate_count`. Each must be a positive
-integer and defaults to 2. Candidate slots run sequentially by default. Optional
+integer and defaults to 2. The local video judge permits at most two slots
+(16 frames each, 32 total) within its verified context budget; this is checked
+before generation. Candidate slots run sequentially by default. Optional
 concurrent generation uses up to the configured count of concurrent candidate
 attempts for that stage; stages remain sequential. Generation, safety, media,
 and speech-to-text implementations must support concurrent calls on the same
@@ -46,16 +64,18 @@ Each video attempt writes sibling `candidate-N-attempt-N.mp4`, `.wav`, and `.jso
 files under `video_candidates/`. Both safety checks run after successful
 transcription and validation; the audio safety model receives transcript text,
 not raw audio. If either check fails, delete all three files and retry without
-feedback. Retain every safe candidate and its sidecars. Reuse the winner's
+feedback. A safe clip missing requested vocabulary is also deleted and retried
+within the same four-attempt budget. Matching allows case and punctuation
+differences, not synonyms, homophones, translations, or inflected forms.
+Retain every accepted candidate and its sidecars. Reuse the winner's
 transcript for subtitles without another speech-to-text call.
 
-For each candidate, generation attempts remain capped at 4 sequential attempts,
-regardless of the stage's candidate count. If the result is unsafe after 4
+For each candidate, workflow attempts remain capped at 4 sequential attempts,
+regardless of the stage's candidate count. If the result fails safety or content checks after 4
 attempts, simply ignore the candidate. If no candidate succeeds, the system will
 stop to allow human intervention.
 
 Provider, transcript validation, and FFmpeg errors stop the run instead of being
 treated as unsafe results or retried. New attempts stop while already-started
-attempts finish. Video generation, visual and audio safety, video quality, and
-speech-to-text integrations remain explicit unimplemented stubs until supplied
-by the caller.
+attempts finish. The abstract provider classes remain extension interfaces; the default local
+factory supplies concrete implementations for every stage.

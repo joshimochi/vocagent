@@ -1,0 +1,200 @@
+{
+  "updated_at_utc": "2026-10-06T07:47:53.235005+00:00",
+  "host": "hs",
+  "physical_gpus": [
+    4,
+    5,
+    6,
+    7
+  ],
+  "settings": {
+    "width": 1344,
+    "height": 768,
+    "seconds": 10,
+    "num_frames": 243,
+    "steps": 2
+  },
+  "attempts": [
+    {
+      "name": "h3-smoke-native-1",
+      "result": "Profiler failed before model loading: reset_peak_memory_stats requires initialized MUSA allocators. Fixed in subsequent attempts."
+    },
+    {
+      "name": "h3-smoke-native-2",
+      "exit_code": 1,
+      "elapsed_seconds": 303.239,
+      "result": "GPU1 ran out of memory during attention Q normalization. No CPU offload or reduced model was used.",
+      "requested_allocation_mib": 1004,
+      "reported_free_mib": 558.97,
+      "gpu_peak_bytes": {
+        "0": {
+          "allocated": 43967147008,
+          "reserved": 44107300864
+        },
+        "1": {
+          "allocated": 47490637824,
+          "reserved": 47821357056
+        },
+        "2": {
+          "allocated": 41417277440,
+          "reserved": 41481666560
+        },
+        "3": {
+          "allocated": 20162262528,
+          "reserved": 20197670912
+        }
+      }
+    },
+    {
+      "name": "h3-smoke-native-3",
+      "result": "Balanced loading passed attention, but the first full-sequence SwiGLU activation ran out of memory. Parent retrieved the failure after SSH recovered at approximately 07:10 UTC. No CPU offload or smaller checkpoint was used.",
+      "encoder_gib": {
+        "musa:0": 34.35,
+        "musa:1": 27.79
+      },
+      "transformer_gib": {
+        "musa:0": 0.11,
+        "musa:1": 7.45,
+        "musa:2": 34.87,
+        "musa:3": 19.3
+      },
+      "vae_gib": {
+        "musa:3": 10.263884339481592
+      },
+      "log": "/data/group6/vocagent/run-a406/h3-smoke-native-3.log",
+      "supervisor_pid": 748397,
+      "last_confirmed_at_utc": "2026-10-06T07:20:45+00:00",
+      "combined_residency_fraction": 0.75,
+      "exit_code": 1,
+      "requested_allocation_gib": 1.96,
+      "reported_free_gib": 1.88,
+      "reported_allocated_gib": 42.17,
+      "reported_reserved_unallocated_gib": 0.767,
+      "followup": "Exact token-wise feed-forward chunking at 8192 tokens is implemented. All 171 tests passed on hs in 6.666 seconds with no skips, including the new SwiGLU numerical-equivalence and fast-path/idempotence tests. Native-resolution capacity with chunking remains pending.",
+      "elapsed_seconds": 306.475,
+      "gpu_peak_bytes": {
+        "0": {
+          "allocated": 41041555456,
+          "reserved": 41181773824
+        },
+        "1": {
+          "allocated": 46878348288,
+          "reserved": 47974449152
+        },
+        "2": {
+          "allocated": 37534407680,
+          "reserved": 37591449600
+        },
+        "3": {
+          "allocated": 31810871808,
+          "reserved": 31864127488
+        }
+      }
+    },
+    {
+      "name": "h3-smoke-native-4",
+      "result": "Passed full unquantized GPU-only H3 generation at native 1344x768 and 10 seconds, including both finite GPU decoders and MP4/audio validation. This two-sigma-point run validates capacity, not generation quality.",
+      "supervisor_pid": 759953,
+      "log": "/data/group6/vocagent/run-a406/h3-smoke-native-4.log",
+      "dependency": "/data/group6/vocagent/run-a406/full-workflow-1.exit",
+      "required_dependency_exit": 0,
+      "wait_deadline_seconds": 10800,
+      "shared_gpu_lock": "/data/group6/vocagent/vocagent-gpu.lock",
+      "combined_residency_fraction": 0.75,
+      "feed_forward_chunk_tokens": 8192,
+      "started_at_utc": "2026-10-06T07:34:55.639767+00:00",
+      "gpu_lock_acquired_at_utc": "2026-10-06T07:34:51.413977+00:00",
+      "worker_pid": 762811,
+      "adapter_sha256": "560d7affe7e53fa86fc970c1dd57e8a0ac00dcbd84377274950d2e39709deea8",
+      "denoise_iteration_seconds": 175.31,
+      "block_completion_elapsed_seconds": {
+        "0": 308.901,
+        "9": 343.356,
+        "19": 375.635,
+        "29": 408.039,
+        "39": 442.096,
+        "49": 474.683
+      },
+      "last_confirmed_at_utc": "2026-10-06T07:46:59.539841+00:00",
+      "encoder_gib": {
+        "musa:0": 34.35,
+        "musa:1": 27.79
+      },
+      "transformer_gib": {
+        "musa:0": 0.11,
+        "musa:1": 7.45,
+        "musa:2": 34.87,
+        "musa:3": 19.3
+      },
+      "vae_gib": {
+        "musa:3": 10.263884339481592
+      },
+      "exit_code": 0,
+      "elapsed_seconds": 612.358,
+      "completed_at_utc": "2026-10-06T07:45:13.655351+00:00",
+      "validated_at_utc": "2026-10-06T07:46:59.539841+00:00",
+      "cpu_or_disk_offload": false,
+      "quantization": false,
+      "gpu_peak_bytes": {
+        "0": {
+          "allocated": 44627842048,
+          "reserved": 47204794368
+        },
+        "1": {
+          "allocated": 46878348288,
+          "reserved": 47974449152
+        },
+        "2": {
+          "allocated": 46556736000,
+          "reserved": 47672459264
+        },
+        "3": {
+          "allocated": 40832870912,
+          "reserved": 47139782656
+        }
+      },
+      "media": {
+        "file": "/data/group6/vocagent/run-a406/h3-smoke-native-4.mp4",
+        "bytes": 4016152,
+        "video": {
+          "codec_name": "h264",
+          "width": 1344,
+          "height": 768,
+          "frames": 243,
+          "fps": 24,
+          "duration_seconds": 10.125
+        },
+        "audio": {
+          "codec_name": "aac",
+          "channels": 2,
+          "sample_rate": 32000,
+          "duration_seconds": 10.125
+        },
+        "decoded_audio": {
+          "float_samples": 649216,
+          "finite": true,
+          "peak_abs": 0.007431930862367153,
+          "rms": 0.0008186704737714385
+        },
+        "validation_log": "/data/group6/vocagent/run-a406/h3-smoke-native-4.media.json"
+      }
+    }
+  ],
+  "scope": "Native 1344x768/10-second peak capacity and finite video/audio export passed with full released unquantized models, GPU-only weights and token-wise feed-forward chunking. The two-sigma-point native probe is not a quality test. The first full 50-point lower-resolution workflow missed its requested vocabulary; a native five-second 50-point workflow using the official speech prompt schema is running separately.",
+  "feed_forward_chunking": {
+    "tokens_per_projection": 8192,
+    "weights_or_attention_changed": false,
+    "cpu_or_disk_offload": false,
+    "numerical_validation": {
+      "host": "hs",
+      "suite_tests": 171,
+      "failures": 0,
+      "skipped": 0,
+      "elapsed_seconds": 6.666,
+      "log": "/data/group6/vocagent/run-a406/tests-complete-2.log"
+    },
+    "adapter_sha256": "560d7affe7e53fa86fc970c1dd57e8a0ac00dcbd84377274950d2e39709deea8",
+    "tests_sha256": "7c8827e84c93c8c51f8a1729696e098bbc1b26fbfe141cb56779c0a34c558585",
+    "native_generation_verified": true
+  }
+}

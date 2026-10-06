@@ -1,7 +1,8 @@
-"""Bounded safety retries followed by an independent quality decision."""
+"""Bounded safety/content retries followed by an independent quality decision."""
 
 from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor
+import logging
 from threading import Event
 from typing import TypeVar
 
@@ -9,10 +10,11 @@ from .models import SafetyResult
 
 
 T = TypeVar("T")
+log = logging.getLogger(__name__)
 
 
 class HumanInterventionRequired(RuntimeError):
-    """All candidate slots failed safety checks and the workflow must stop."""
+    """All candidate slots failed acceptance checks and the workflow must stop."""
 
 
 def validate_safety_result(safety: SafetyResult, stage: str) -> SafetyResult:
@@ -38,14 +40,18 @@ def select_candidate(
     pass_feedback: bool,
     candidate_count: int = 2,
     concurrent_candidates: bool = False,
+    check_content: Callable[[T], str | None] | None = None,
 ) -> T:
-    """Choose among configurable slots with up to four safety attempts each.
+    """Choose among configurable slots with up to four attempts each.
 
     The generator receives a one-based slot and attempt, plus the previous
     unsafe reason when feedback is enabled. The quality judge receives only
     the safe survivors in slot order and returns a zero-based index into that
     sequence. Slots run sequentially by default. With concurrent_candidates=True,
     generation and safety callbacks must support up to candidate_count concurrent calls.
+    Optional check_content runs only after safety passes and returns None to
+    accept or a nonempty rejection reason. Content and safety rejections share
+    the same four-attempt budget; provider errors still stop the workflow.
     Each slot's retries remain sequential. Provider exceptions stop new attempts
     and propagate after in-flight work finishes, without becoming safety failures.
     """
@@ -62,12 +68,29 @@ def select_candidate(
                 candidate = generate(slot, attempt, feedback)
                 safety = validate_safety_result(check_safety(candidate), stage)
                 if safety.safe:
-                    return [candidate]
-                if pass_feedback:
-                    feedback = safety.reason if safety.reason.strip() else (
+                    log.info("%s slot %d attempt %d passed safety", stage, slot, attempt)
+                    reason = check_content(candidate) if check_content is not None else None
+                    if reason is None:
+                        return [candidate]
+                    if not isinstance(reason, str) or not reason.strip():
+                        raise ValueError(
+                            f"{stage}: the content checker must return None or a nonempty reason."
+                        )
+                    log.warning(
+                        "%s slot %d attempt %d rejected for content: %r",
+                        stage, slot, attempt, reason,
+                    )
+                else:
+                    log.warning(
+                        "%s slot %d attempt %d rejected: %r", stage, slot, attempt,
+                        safety.reason or "Safety checker supplied no reason.",
+                    )
+                    reason = safety.reason if safety.reason.strip() else (
                         "The previous candidate failed the safety check. "
                         "Generate a safer alternative."
                     )
+                if pass_feedback:
+                    feedback = reason
         except Exception:
             stopped.set()
             raise
@@ -82,7 +105,7 @@ def select_candidate(
 
     if not accepted:
         raise HumanInterventionRequired(
-            f"{stage}: no safe candidate after {candidate_count} slots with four attempts "
+            f"{stage}: no acceptable candidate after {candidate_count} slots with four attempts "
             "each; human intervention is required."
         )
 

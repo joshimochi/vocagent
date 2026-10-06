@@ -1,250 +1,175 @@
 # vocagent
 
-A small Python implementation of [workflow.md](workflow.md), using only the
-standard library. Python 3.10+ is required. Qwen3 generates and judges outlines
-and storyboards through local model endpoints. Qwen3Guard screens each generated
-candidate using its native response-moderation template. Prompts are concise and
-the generation and quality agents make separate, stateless calls.
+A vocabulary-to-video agent with separate generation, safety, and selection calls.
+The default provider factory is `vocagent.local:create_providers`, intended to run
+entirely on `hs`, using physical GPUs **4–7** (four MTT S4000, 48 GiB each).
 
-Video generation, visual safety, transcript-based audio safety, video quality,
-and speech-to-text remain explicit provider stubs. The full video workflow
-additionally requires FFmpeg on `PATH`,
-with the `ass` filter (libass), `libx264`, and AAC support.
+| Task | Local checkpoint |
+| --- | --- |
+| Outline, storyboard, text selection, visual video selection | Qwen/Qwen3-VL-32B-Instruct, BF16 |
+| Text and complete transcript safety | Qwen/Qwen3Guard-Gen-8B, BF16 |
+| Video with native audio | MiniMaxAI/MiniMax-H3, full released weights |
+| Speech recognition | Qwen/Qwen3-ASR-1.7B, BF16 |
+| Word timestamps | Qwen/Qwen3-ForcedAligner-0.6B, BF16 |
+| Visual safety | google/shieldgemma-2-4b-it, BF16 |
 
-## Generate through storyboard
+**Final content validation is in progress.** The complete technical pipeline and
+native-resolution H3 capacity checks passed on `hs`. A new full run is
+verifying spoken vocabulary with H3's native dialogue format. See [deployment status](deploy/README.md)
+for the exact completed checks and remaining work.
 
-With the model services running on `hs`, open an SSH tunnel:
+## Run on hs
+
+After deploying and setting up the environment as described in
+[deploy/README.md](deploy/README.md):
 
 ```sh
-ssh -F ~/.ssh/config -N \
-  -L 8000:127.0.0.1:18080 -L 8001:127.0.0.1:18081 hs
+cd /data/group6/vocagent/run-a406/app
+bash deploy/run_hs.sh sunrise curious journey \
+  --output-dir /data/group6/vocagent/outputs/example
 ```
 
-Then, in another terminal:
+The CLI now defaults to a complete subtitled video. `--stop-after storyboard`
+stops after the selected text artifacts. The output directory must be new or
+empty. Candidate counts default to two per stage:
 
 ```sh
-python3 -m vocagent sunrise curious journey \
-  --output-dir output
+bash deploy/run_hs.sh sunrise curious journey \
+  --outline-candidate-count 2 --storyboard-candidate-count 2 \
+  --video-candidate-count 2 --output-dir /data/group6/vocagent/outputs/example-2
 ```
 
-This generates, safety-checks, and judges both stages, then writes
-`vocabulary.json`, `outline.txt`, and `storyboard.txt`. It needs no video model or
-FFmpeg. Each stage defaults to two candidates and retains the existing safety
-retry/quality selection workflow below.
+The Python API remains:
 
-The default provider factory is `vocagent.qwen:create_providers`. Configuration:
+```python
+from vocagent.local import create_providers
+from vocagent.pipeline import Workflow
+
+providers = create_providers()
+try:
+    result = Workflow(providers).run(["sunrise", "curious"], "output")
+    print(result.final_video)
+finally:
+    providers.close()
+```
+
+## Memory and model choice
+
+The runtime loads a model family on demand and destroys the previous weights
+before loading its replacement. It checks every model parameter and placement
+hook, rejecting CPU, disk, and meta placement or weight offloading. GPU memory
+budgets reserve runtime headroom; insufficient memory stops the run. There is no
+smaller-model or CPU inference fallback. CPU tokenization, checkpoint reading,
+media decoding/encoding, and input preprocessing are ordinary supporting work.
+
+The 32B model is the largest dense Qwen3-VL release. The 235B checkpoint exceeds
+this allocation in BF16 and FP8; the installed S4000 stack has not demonstrated a
+working GPU-only 4-bit route. The other Qwen checkpoints are their largest
+released family sizes; ShieldGemma 2 provides a 4B checkpoint. H3 uses the full
+released encoder and diffusion weights in BF16 and its decoders in FP32 (video decoding uses FP16 autocast on MUSA).
+Full H3 GPU residency and low-resolution native audio/video generation passed on hs.
+Normal-resolution memory capacity also passed. The corrected full run verifies
+spoken vocabulary using the native H3 prompt format.
+
+Separate stateless text generation and selection agents share the same VL
+weights. Qwen3-VL uses uncached SDPA on MUSA because cached decoding failed
+correctness checks on the installed stack. ASR and its small aligner reside together. H3 runs in a separate Python
+process because its dependency versions conflict with the speech package;
+the shared GPU lock covers that process through its exit. Concurrent candidate
+threads can preprocess in parallel, but model inference remains serialized.
+
+## Workflow and safety behavior
+
+1. Generate outlines; check each with Qwen3Guard; select the best safe outline.
+2. Generate H3-native storyboards with speaker IDs, language-tagged dialogue and
+   a speaking budget matched to the clip duration. Permit one format repair;
+   check the final prompt with Guard and select the best safe storyboard.
+3. Generate a video with native audio. Extract mono 16 kHz PCM audio with FFmpeg.
+4. Run Qwen3-ASR plus forced alignment. Preserve the recognized text and its
+   aligned timestamps in the saved transcript and subtitle cues.
+5. Check visual frames with ShieldGemma 2 and the **complete recognized
+   transcript** with Qwen3Guard. Both checks must pass.
+6. Require every requested word or phrase in the actual ASR transcript. Missing
+   vocabulary rejects the clip and uses the same bounded retry budget.
+7. Use Qwen3-VL to select among accepted videos from actual, timestamped image frames.
+8. Reuse the selected transcript; write ASS subtitles and burn them into the
+   selected video with FFmpeg, preserving its audio.
+
+ShieldGemma 2 is an **image** safety classifier, applied throughout the video at
+2 frames/second, including the final nominal frame. It checks the model's
+`dangerous`, `sexual`, and `violence` policies; any violation probability at or
+above 0.5 rejects the candidate. Sampling cannot guarantee detection of brief
+events between samples. Clips exceeding the sampling budget are rejected with an
+error rather than silently shortening coverage. VL video judging samples up to
+16 frames per candidate. The local 16K-context configuration allows two video
+candidate slots (32 frames total), validated before any generation. The legacy
+HTTP adapter permits up to 64 frames. Video judging evaluates visible evidence;
+it does not listen to audio. Spoken vocabulary matching uses normalized complete
+words or phrases, allowing case and punctuation differences. It does not infer
+synonyms, homophones, translations, or inflected forms.
+
+Each candidate slot gets at most four generation/safety/content attempts. Unsafe text
+supplies feedback to the next attempt. Rejected video attempts and their audio
+and transcript files are deleted and regenerated without feedback. Candidates
+passing safety and spoken-vocabulary coverage are retained; an exhausted slot is ignored. A separate quality judge
+still runs when only one candidate survives. If none survive, the workflow
+raises `HumanInterventionRequired`.
+
+Provider errors, missing speech, incomplete alignment, malformed moderation,
+truncated text, invalid selections, GPU failures, and media errors stop the run;
+they are never converted into fabricated safe results. Automatic resume is not
+implemented; start another run in a new output directory after resolving a failure.
+
+## Configuration
+
+All model paths are local directories. `VOCAGENT_DEPLOY_ROOT` defaults to
+`/data/group6/vocagent`. The deployment container exposes only GPUs 4–7.
 
 | Variable | Default |
 | --- | --- |
-| `QWEN_BASE_URL` | `http://127.0.0.1:8000/v1` |
-| `QWEN_MODEL` | `qwen3` |
-| `QWEN_GUARD_BASE_URL` | `http://127.0.0.1:8001/v1` |
-| `QWEN_GUARD_MODEL` | `qwen3-guard` |
-| `QWEN_API_KEY`, `QWEN_GUARD_API_KEY` | empty; optional separate Bearer tokens |
-| `QWEN_TIMEOUT_SECONDS`, `QWEN_GUARD_TIMEOUT_SECONDS` | `120` each |
+| `QWEN_VL_MODEL` | `$VOCAGENT_DEPLOY_ROOT/models/Qwen3-VL-32B-Instruct` |
+| `QWEN_GUARD_MODEL_PATH` | `$VOCAGENT_DEPLOY_ROOT/models/Qwen3Guard-Gen-8B` |
+| `QWEN_ASR_MODEL` | `$VOCAGENT_DEPLOY_ROOT/models/Qwen3-ASR-1.7B` |
+| `QWEN_ALIGNER_MODEL` | `$VOCAGENT_DEPLOY_ROOT/models/Qwen3-ForcedAligner-0.6B` |
+| `SHIELDGEMMA_MODEL` | `$VOCAGENT_DEPLOY_ROOT/models/shieldgemma-2-4b-it` |
+| `MINIMAX_H3_MODEL` | `/data/group6/minimax-h3/models/MiniMax-H3` |
+| `MINIMAX_H3_PYTHON` | `$VOCAGENT_DEPLOY_ROOT/run-a406/h3-venv/bin/python` |
+| `MINIMAX_H3_WIDTH`, `MINIMAX_H3_HEIGHT` | `1344`, `768` |
+| `MINIMAX_H3_SECONDS`, `MINIMAX_H3_STEPS` | `10`, `50` |
+| `MINIMAX_H3_TIMEOUT_SECONDS` | `14400` per video candidate |
 
-When running directly on `hs`, use base URLs with ports `18080` and `18081`.
-The services bind to host loopback; remote access uses SSH.
-See [deployment instructions](deploy/README.md) for the GPU configuration,
-checkpoint provenance, and service commands.
+H3 duration is 5–15 seconds, rounded to its native video-frame grid. The default
+1344×768, 10-second shape passed a full GPU capacity check. Native-resolution
+generation is slow on S4000: allow roughly 2.5 hours for a 10-second, 50-point
+render based on the measured single iteration; the default worker limit is four
+hours and can be overridden. Many vocabulary
+items may not fit naturally in a single clip; choose a small vocabulary set.
 
-Only a complete, valid `Safe` verdict passes. `Unsafe` and `Controversial`
-verdicts provide category feedback for regeneration. Transport errors, malformed
-verdicts, truncated completions, and invalid judge selections stop the workflow.
-Qwen3Guard supplies the moderation policy; the application does not substitute
-keyword checks. Its documented format is in the
-[official model card](https://huggingface.co/Qwen/Qwen3Guard-Gen-8B).
+The legacy HTTP-only factory `vocagent.qwen:create_providers` is retained for
+existing text endpoints and defaults to `storyboard` when explicitly selected.
+Its `QWEN_BASE_URL`, `QWEN_MODEL`, `QWEN_GUARD_BASE_URL`, `QWEN_GUARD_MODEL`,
+optional API-key and timeout variables retain their previous behavior. It still
+requires custom video providers to continue past storyboard. New local runs do
+not need API endpoints, keys, or SSH tunnels.
 
-Python callers can stop at the same boundary:
+## Outputs and tests
 
-```python
-from vocagent.pipeline import Workflow
-from vocagent.qwen import create_providers
-
-result = Workflow(create_providers()).run(
-    ["sunrise", "curious"], "output", stop_after="storyboard"
-)
-print(result.storyboard)
-```
-
-`StoryboardResult` contains the selected outline and storyboard paths.
-
-## Workflow
-
-1. Accept vocabulary words or phrases.
-2. Generate and select a story outline.
-3. Generate and select a storyboard from the selected outline.
-4. For each video attempt, generate a video from the selected storyboard, extract
-   mono, 16 kHz PCM audio with FFmpeg, and transcribe it into validated timestamped
-   segments. Save the audio and transcript alongside that candidate.
-5. Check the video's visuals and its audio transcript with separate safety models.
-   Select the best video from the candidates that pass both checks.
-6. Reuse the selected candidate's audio and transcript, and write ASS subtitles
-   using the original segment timestamps.
-7. Burn the subtitles into the selected video with FFmpeg, preserving its audio.
-
-Each of the three generation stages has an independently configurable candidate
-count, defaulting to two. A stage fills its candidate slots sequentially by
-default. Enable concurrent candidate generation to use up to its configured count
-of worker threads. Each slot gets at most four sequential generation/safety
-attempts. A safe candidate ends that slot's retries; an
-exhausted slot is ignored. Once all slots finish, the quality judge picks from
-the safe candidates in slot order, even if only one survived. If none survived,
-the workflow raises `HumanInterventionRequired` and stops before the next stage.
-
-For text, the preceding safety failure reason is passed to the next attempt in
-the same slot. Each successfully transcribed video attempt runs both visual and
-audio safety checks. Failure of either check deletes that attempt's video, audio,
-and transcript, and retries the slot without feedback. Generation, safety, and
-judging are separate dependencies. Supply separate agents for text generation,
-safety, and quality, and specialized models for visual safety, audio safety, and
-video quality.
-
-Provider, transcript validation, and FFmpeg errors stop the run; they are not
-silently classified as unsafe candidates or retried. An error stops new attempts;
-already-started attempts finish before the error is raised. Earlier artifacts
-remain available for inspection after a failure. After human
-intervention, start a new run in a new or empty directory; automatic resume is
-not implemented.
-
-## Connect providers
-
-To extend the workflow beyond storyboard, implement the remaining methods in
-[`vocagent/providers.py`](vocagent/providers.py).
-You can subclass the stubs or supply objects with matching methods. A video
-provider must write a nonempty video with an audio track to the requested path.
-When concurrent candidate generation is enabled, generation, safety,
-speech-to-text, and media implementations must be thread-safe for up to the
-configured candidate count of concurrent calls on the same instance for each
-stage. Each video attempt receives distinct video, audio, and transcript paths.
-Each stage's quality judge runs once after all slots finish; workflow stages
-remain sequential.
-Safety providers return `SafetyResult(safe=True)` or
-`SafetyResult(safe=False, reason="...")`. Quality providers return a zero-based
-index into the safe candidates passed to them. Speech-to-text returns
-`TranscriptSegment(start=0.0, end=1.5, text="...")` objects with times in seconds.
-`VideoSafetyModel.check(video_path)` assesses the visuals;
-`AudioSafetyModel.check(transcript)` assesses spoken content from a string formed
-by joining the segment texts with newlines. It receives neither raw audio nor
-timestamped objects. An audio safety implementation is required: the default
-stub raises an unimplemented error instead of passing the candidate.
-
-Create a module such as `my_providers.py` with a factory that returns a
-`Providers` instance containing your implementations:
-
-```python
-from vocagent.providers import Providers
-
-
-def create_providers():
-    return Providers(
-        llm=MyLLMGenerator(),
-        text_safety=MyTextSafetyAgent(),
-        text_quality=MyTextQualityAgent(),
-        video=MyVideoGenerator(),
-        video_safety=MyVideoSafetyModel(),
-        video_quality=MyVideoQualityModel(),
-        speech_to_text=MySpeechToText(),
-        audio_safety=MyAudioSafetyModel(),
-    )
-```
-
-The `My...` classes above stand for your implementations; they are intentionally
-not included. Then run from the repository root:
-
-```sh
-python3 -m vocagent sunrise curious journey \
-  --providers my_providers:create_providers --output-dir output \
-  --outline-candidate-count 6 --storyboard-candidate-count 3 --video-candidate-count 2
-```
-
-The three candidate count flags accept positive integers and each defaults to
-`2` when omitted. They change the number of candidate slots, while each slot
-still gets at most four generation/safety attempts.
-
-Add `--concurrent-candidates` to enable concurrent candidate generation.
-
-The CLI defaults to `storyboard` with the built-in Qwen text providers, including
-when their factory is explicitly supplied with `--providers`. Custom provider
-factories default to `video`. Use `--stop-after` to override either default.
-The Python `Workflow.run()` API keeps its `video` default; pass
-`stop_after="storyboard"` when using the supplied text providers.
-Exit codes are `0` for success, `1` for
-provider/configuration/media errors, and `2` when all candidates fail safety and
-human intervention is required or CLI arguments are invalid. The output directory
-must be new or empty.
-
-The same pipeline can be called from Python:
-
-```python
-from vocagent.pipeline import Workflow
-from my_providers import create_providers
-
-workflow = Workflow(
-    create_providers(),
-    outline_candidate_count=6,
-    storyboard_candidate_count=3,
-    video_candidate_count=2,
-)
-result = workflow.run(["sunrise", "curious"], "output")
-print(result.final_video)
-```
-
-The three Python keyword arguments also accept positive integers and each
-defaults to `2` when omitted. Add `concurrent_candidates=True` to the `Workflow`
-constructor to enable concurrent candidate generation.
-
-## macOS and Linux setup
-
-Use Python 3.10+. For the full video workflow, also use an FFmpeg build with the
-`ass` filter (libass), `libx264`, and AAC support. Install them through your
-system's package manager if needed, along with a font suitable for your subtitle
-language. FFmpeg and pip are not
-bundled with this repository. Use `python3` consistently,
-since a `python` command is not present on every system. Check the prerequisites:
-
-```sh
-python3 --version
-ffmpeg -version
-ffmpeg -hide_banner -h filter=ass
-ffmpeg -hide_banner -h encoder=libx264
-ffmpeg -hide_banner -h encoder=aac
-```
-
-Running `python3 -m vocagent` from the repository root requires no installation
-and no Python runtime dependencies. To optionally install the `vocagent` command,
-create a virtual environment:
-
-```sh
-python3 -m venv .venv
-. .venv/bin/activate
-python3 -m pip install -e .
-```
-
-If creating the environment fails because `venv` or `ensurepip` is unavailable,
-install your system's Python virtual-environment support first (the
-`python3-venv` package on Debian/Ubuntu).
-
-## Outputs
-
-The output directory contains `vocabulary.json`, `outline.txt`, `storyboard.txt`,
-safe candidates under `video_candidates/`, `audio.wav`, `transcript.json`,
-`subtitles.ass`, and `final.mp4`. Each retained candidate has sibling
-`candidate-N-attempt-N.mp4`, `.wav`, and `.json` files. The winning candidate's
-WAV and JSON are copied to the top-level `audio.wav` and `transcript.json`;
-selection does not run speech-to-text again. Other safe candidates and their
-sidecars remain available for inspection. `WorkflowResult` includes the selected
-video's path as well as the paths of the other main artifacts. Subtitle text and
-timing come from the same validated segments that passed audio safety.
-
-## Tests
+Outputs include `vocabulary.json`, `outline.txt`, `storyboard.txt`, safe video
+candidates and sidecars in `video_candidates/`, the selected `audio.wav` and
+`transcript.json`, `subtitles.ass`, and `final.mp4`. Earlier artifacts remain
+available after a provider failure.
 
 ```sh
 python3 -m unittest discover -s tests -v
 ```
 
-Tests use deterministic fake providers to exercise the workflow without model
-services. Media and subtitle tests cover FFmpeg commands, failures, and subtitle
-formatting. Real audio extraction runs when FFmpeg is available; the real
-subtitle-burning test also requires the `ass` filter and is skipped if it is
-missing. Check support with `ffmpeg -hide_banner -h filter=ass`.
+Core workflow tests need only Python 3.10+. Real media tests require FFmpeg and
+FFprobe with libass, H.264, and AAC. Numerical H3 compatibility tests require
+PyTorch; real model smoke tests require the `hs` environments and checkpoints.
+Fake-provider tests alone do not establish model/runtime compatibility.
+
+Official references: [Qwen3-VL](https://huggingface.co/Qwen/Qwen3-VL-32B-Instruct),
+[Qwen3Guard](https://huggingface.co/Qwen/Qwen3Guard-Gen-8B),
+[Qwen3-ASR and aligner](https://github.com/QwenLM/Qwen3-ASR),
+[ShieldGemma 2](https://huggingface.co/google/shieldgemma-2-4b-it),
+[H3 MUSA recipe](https://github.com/vllm-project/vllm-omni/blob/main/recipes/MiniMaxAI/MiniMax-H3-MUSA.md).

@@ -116,6 +116,54 @@ class SelectionTests(unittest.TestCase):
         self.assertEqual(generate.call_count, 4)
         self.assertTrue(all(call.args[2] is None for call in generate.call_args_list))
 
+    def test_content_rejections_share_safety_budget_and_only_survivors_are_judged(self):
+        generate = Mock(side_effect=lambda slot, attempt, feedback: (slot, attempt))
+        content = Mock(side_effect=lambda candidate: None if candidate[1] == 4 else "missing word")
+        judge = Mock(return_value=0)
+        result = select_candidate(
+            stage="video", generate=generate, candidate_count=1,
+            check_safety=lambda candidate: SafetyResult(candidate[1] > 1, "unsafe"),
+            check_content=content, choose_best=judge, pass_feedback=False,
+        )
+        self.assertEqual(result, (1, 4))
+        self.assertEqual(generate.call_count, 4)
+        self.assertEqual([call.args[0] for call in content.call_args_list], [(1, 2), (1, 3), (1, 4)])
+        self.assertTrue(all(call.args[2] is None for call in generate.call_args_list))
+        judge.assert_called_once_with(((1, 4),))
+
+    def test_all_content_failures_exhaust_budget_without_quality_judging(self):
+        generate = Mock(return_value="candidate")
+        judge = Mock()
+        with self.assertRaisesRegex(HumanInterventionRequired, "no acceptable candidate"):
+            select_candidate(
+                stage="video", generate=generate, candidate_count=2,
+                check_safety=lambda _: SafetyResult(True), check_content=lambda _: "missing word",
+                choose_best=judge, pass_feedback=False,
+            )
+        self.assertEqual(generate.call_count, 8)
+        judge.assert_not_called()
+
+    def test_invalid_content_decisions_and_errors_stop_without_retry(self):
+        for decision in ("", "  ", False, 0, SafetyResult(True), RuntimeError("content unavailable")):
+            with self.subTest(decision=decision):
+                generate = Mock(return_value="candidate")
+                content = Mock()
+                if isinstance(decision, Exception):
+                    content.side_effect = decision
+                    expected = RuntimeError
+                else:
+                    content.return_value = decision
+                    expected = ValueError
+                judge = Mock()
+                with self.assertRaises(expected):
+                    select_candidate(
+                        stage="video", generate=generate,
+                        check_safety=lambda _: SafetyResult(True), check_content=content,
+                        choose_best=judge, pass_feedback=False,
+                    )
+                generate.assert_called_once_with(1, 1, None)
+                judge.assert_not_called()
+
     def test_exhausted_slots_are_ignored_and_single_survivor_is_judged(self):
         generate = Mock(side_effect=lambda slot, attempt, feedback: (slot, attempt))
         judge = Mock(return_value=0)
