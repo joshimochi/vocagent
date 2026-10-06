@@ -3,10 +3,10 @@
 import json
 from dataclasses import asdict
 from pathlib import Path
-from typing import Sequence
+from typing import Literal, Sequence
 
 from .media import FFmpegMedia
-from .models import SafetyResult, WorkflowResult
+from .models import SafetyResult, StoryboardResult, WorkflowResult
 from .providers import Providers
 from .selection import select_candidate
 from .subtitles import validate_segments, write_ass
@@ -31,13 +31,22 @@ class Workflow:
             if type(count) is not int or count < 1:
                 raise ValueError(f"{name} must be a positive integer.")
         self.providers = providers
-        self.media = media if media is not None else FFmpegMedia()
+        self.media = media
         self.outline_candidate_count = outline_candidate_count
         self.storyboard_candidate_count = storyboard_candidate_count
         self.video_candidate_count = video_candidate_count
         self.concurrent_candidates = concurrent_candidates
 
-    def run(self, vocabulary: Sequence[str], output_dir: str | Path) -> WorkflowResult:
+    def run(
+        self,
+        vocabulary: Sequence[str],
+        output_dir: str | Path,
+        *,
+        stop_after: Literal["storyboard", "video"] = "video",
+    ) -> StoryboardResult | WorkflowResult:
+        """Write selected text artifacts, optionally continuing through final video."""
+        if stop_after not in ("storyboard", "video"):
+            raise ValueError("stop_after must be 'storyboard' or 'video'.")
         if isinstance(vocabulary, str) or not vocabulary:
             raise ValueError("Provide a nonempty sequence of vocabulary words.")
         if any(not isinstance(word, str) or not word.strip() for word in vocabulary):
@@ -89,6 +98,9 @@ class Workflow:
         )
         storyboard_path = output / "storyboard.txt"
         storyboard_path.write_text(storyboard, encoding="utf-8")
+        if stop_after == "storyboard":
+            return StoryboardResult(outline=outline_path, storyboard=storyboard_path)
+
         candidates_dir = output / "video_candidates"
         candidates_dir.mkdir()
 
@@ -115,8 +127,9 @@ class Workflow:
             concurrent_candidates=self.concurrent_candidates,
         )
 
+        media = self.media if self.media is not None else FFmpegMedia()
         audio_path = output / "audio.wav"
-        self.media.extract_audio(selected_video, audio_path)
+        media.extract_audio(selected_video, audio_path)
         segments = list(providers.speech_to_text.transcribe(audio_path))
         validate_segments(segments)
         transcript_path = output / "transcript.json"
@@ -127,7 +140,7 @@ class Workflow:
         )
         subtitles_path = write_ass(segments, output / "subtitles.ass")
         final_path = output / "final.mp4"
-        self.media.burn_subtitles(selected_video, subtitles_path, final_path)
+        media.burn_subtitles(selected_video, subtitles_path, final_path)
         return WorkflowResult(
             outline=outline_path,
             storyboard=storyboard_path,

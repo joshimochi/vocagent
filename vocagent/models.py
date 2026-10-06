@@ -20,6 +20,14 @@ class TranscriptSegment:
 
 
 @dataclass(frozen=True)
+class StoryboardResult:
+    """Selected, safety-checked outline and storyboard artifacts."""
+
+    outline: Path
+    storyboard: Path
+
+
+@dataclass(frozen=True)
 class WorkflowResult:
     outline: Path
     storyboard: Path

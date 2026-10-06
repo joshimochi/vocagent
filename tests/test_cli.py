@@ -9,22 +9,83 @@ import unittest
 from unittest.mock import Mock, patch
 
 from vocagent.__main__ import load_providers, main
-from vocagent.models import SafetyResult
+from vocagent.models import SafetyResult, StoryboardResult
 from vocagent.providers import LLMGenerator, Providers, TextSafetyAgent
 
 
 class CLITests(unittest.TestCase):
-    def test_default_stubs_stop_with_clear_error_and_exit_one(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            output = Path(temporary) / "result"
-            stderr = io.StringIO()
-            stdout = io.StringIO()
-            with redirect_stderr(stderr), redirect_stdout(stdout):
-                status = main(["apple", "--output-dir", str(output)])
+    def test_default_provider_configuration_failure_is_a_clear_cli_error(self):
+        stderr = io.StringIO()
+        stdout = io.StringIO()
+        with patch("vocagent.__main__.load_providers",
+                   side_effect=ValueError("Configure the Qwen endpoints")) as load, \
+                redirect_stderr(stderr), redirect_stdout(stdout):
+            status = main(["apple", "--stop-after", "storyboard"])
 
+        load.assert_called_once_with("vocagent.qwen:create_providers")
         self.assertEqual(status, 1)
-        self.assertIn("Workflow stopped: Implement LLMGenerator.generate_outline", stderr.getvalue())
+        self.assertIn("Workflow stopped: Configure the Qwen endpoints", stderr.getvalue())
         self.assertEqual(stdout.getvalue(), "")
+
+    def test_default_qwen_factory_stops_at_storyboard(self):
+        llm = Mock(spec=LLMGenerator)
+        llm.generate_outline.return_value = "A story about an apple."
+        llm.generate_storyboard.return_value = "Scene 1: An apple falls."
+        safety = Mock(spec=TextSafetyAgent)
+        safety.check.return_value = SafetyResult(True)
+        quality = Mock()
+        quality.choose.return_value = 0
+        providers = Providers(llm=llm, text_safety=safety, text_quality=quality)
+        with tempfile.TemporaryDirectory() as temporary:
+            stdout = io.StringIO()
+            with patch("vocagent.__main__.load_providers", return_value=providers) as load, \
+                    redirect_stdout(stdout):
+                status = main(["apple", "--output-dir", temporary])
+
+            self.assertEqual(status, 0)
+            load.assert_called_once_with("vocagent.qwen:create_providers")
+            output = Path(temporary)
+            self.assertEqual(stdout.getvalue(), f"{output / 'storyboard.txt'}\n")
+            self.assertEqual((output / "storyboard.txt").read_text(), "Scene 1: An apple falls.")
+            self.assertEqual({path.name for path in output.iterdir()}, {
+                "vocabulary.json", "outline.txt", "storyboard.txt",
+            })
+
+    def test_explicit_qwen_factory_defaults_to_storyboard(self):
+        providers = Providers()
+        result = StoryboardResult(Path("/tmp/outline.txt"), Path("/tmp/storyboard.txt"))
+        stdout = io.StringIO()
+        with patch("vocagent.__main__.load_providers", return_value=providers) as load, \
+                patch("vocagent.__main__.Workflow") as workflow, \
+                redirect_stdout(stdout):
+            workflow.return_value.run.return_value = result
+            status = main(["apple", "--providers", "vocagent.qwen:create_providers",
+                           "--output-dir", "chosen"])
+
+        self.assertEqual(status, 0)
+        load.assert_called_once_with("vocagent.qwen:create_providers")
+        workflow.return_value.run.assert_called_once_with(
+            ["apple"], Path("chosen"), stop_after="storyboard",
+        )
+        self.assertEqual(stdout.getvalue(), f"{result.storyboard}\n")
+
+    def test_explicit_stop_stage_overrides_each_provider_default(self):
+        for factory_args in ([], ["--providers", "example:build"]):
+            for stage in ("storyboard", "video"):
+                with self.subTest(factory_args=factory_args, stage=stage), \
+                        patch("vocagent.__main__.load_providers", return_value=Providers()), \
+                        patch("vocagent.__main__.Workflow") as workflow, \
+                        redirect_stdout(io.StringIO()):
+                    workflow.return_value.run.return_value = (
+                        StoryboardResult(Path("outline.txt"), Path("storyboard.txt"))
+                        if stage == "storyboard" else SimpleNamespace(final_video=Path("final.mp4"))
+                    )
+                    status = main(["apple", *factory_args, "--stop-after", stage])
+
+                self.assertEqual(status, 0)
+                workflow.return_value.run.assert_called_once_with(
+                    ["apple"], Path("output"), stop_after=stage,
+                )
 
     def test_safety_exhaustion_reports_human_intervention_and_exit_two(self):
         llm = Mock(spec=LLMGenerator)
@@ -43,7 +104,7 @@ class CLITests(unittest.TestCase):
         self.assertIn("outline", stderr.getvalue())
         self.assertEqual(llm.generate_outline.call_count, 8)
 
-    def test_success_prints_final_path_and_passes_cli_arguments(self):
+    def test_custom_provider_defaults_to_video_and_prints_final_path(self):
         providers = Providers()
         final_path = Path("/tmp/example-final.mp4")
         stdout = io.StringIO()
@@ -61,7 +122,7 @@ class CLITests(unittest.TestCase):
             video_candidate_count=2, concurrent_candidates=False,
         )
         workflow.return_value.run.assert_called_once_with(
-            ["apple", "green pear"], Path("chosen-output"),
+            ["apple", "green pear"], Path("chosen-output"), stop_after="video",
         )
         self.assertEqual(stdout.getvalue(), f"{final_path}\n")
 
@@ -128,6 +189,15 @@ class CLITests(unittest.TestCase):
             providers, outline_candidate_count=2, storyboard_candidate_count=2,
             video_candidate_count=2, concurrent_candidates=True,
         )
+
+    def test_invalid_stop_stage_is_rejected_before_loading_providers(self):
+        stderr = io.StringIO()
+        with patch("vocagent.__main__.load_providers") as load, \
+                redirect_stderr(stderr), self.assertRaises(SystemExit) as raised:
+            main(["apple", "--stop-after", "outline"])
+        self.assertEqual(raised.exception.code, 2)
+        self.assertIn("--stop-after", stderr.getvalue())
+        load.assert_not_called()
 
     def test_provider_load_failure_is_a_clear_cli_error(self):
         stderr = io.StringIO()

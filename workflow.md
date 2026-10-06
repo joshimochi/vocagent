@@ -7,6 +7,14 @@
 7. create ASS subtitle
 8. ffmpeg combines to final video
 
+The built-in text implementation uses Qwen3 for generation and quality judging,
+and Qwen3Guard for response safety. The CLI defaults to finishing after step 3
+with these built-in providers. Custom provider factories default to the full
+video workflow; `--stop-after` overrides either CLI default. Python callers use
+`Workflow.run(..., stop_after="storyboard")` to finish after step 3 with the
+selected outline and storyboard. The Python API still defaults to the full
+video workflow. Video and speech providers remain unimplemented.
+
 For generating story outline, storyboard and video, use a safety + quality filter:
 1. Generate the configured number of candidates for the stage.
 2. For each candidate, check safety until pass.

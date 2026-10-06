@@ -5,10 +5,10 @@ from pathlib import Path
 import tempfile
 from threading import Barrier, Lock, current_thread
 import unittest
-from unittest.mock import Mock, call
+from unittest.mock import Mock, call, patch
 
 from vocagent.media import FFmpegMedia
-from vocagent.models import SafetyResult, TranscriptSegment
+from vocagent.models import SafetyResult, StoryboardResult, TranscriptSegment
 from vocagent.pipeline import Workflow
 from vocagent.providers import (
     LLMGenerator, Providers, SpeechToText, TextQualityAgent, TextSafetyAgent,
@@ -121,6 +121,53 @@ class PipelineTests(unittest.TestCase):
         self.assertIn("A green pear. 梨", subtitles)
         self.assertEqual(result.audio.read_bytes(), b"fake audio")
         self.assertEqual(result.final_video.read_bytes(), b"fake subtitled video")
+
+    def test_storyboard_stop_saves_selected_safe_text_without_video_or_media(self):
+        self.text_safety.check.side_effect = (
+            lambda stage, text: SafetyResult(text != "storyboard 1", "use safe scenes")
+        )
+        # With no supplied media, even constructing FFmpegMedia is unnecessary.
+        with patch("vocagent.pipeline.FFmpegMedia") as media_factory:
+            result = Workflow(self.providers).run(
+                [" apple ", "pear"], self.output, stop_after="storyboard",
+            )
+        self.assertIsInstance(result, StoryboardResult)
+        self.assertEqual(result.outline.read_text(), "outline 2")
+        self.assertEqual(result.storyboard.read_text(), "storyboard 2")
+        self.assertEqual(json.loads((self.output / "vocabulary.json").read_text()),
+                         ["apple", "pear"])
+        self.assertEqual({path.name for path in self.output.iterdir()},
+                         {"vocabulary.json", "outline.txt", "storyboard.txt"})
+        self.assertEqual(self.text_quality.choose.call_count, 2)
+        self.assertEqual(self.llm.generate_storyboard.call_args_list, [
+            call(("apple", "pear"), "outline 2", None),
+            call(("apple", "pear"), "outline 2", "use safe scenes"),
+            call(("apple", "pear"), "outline 2", None),
+        ])
+        self.video.generate.assert_not_called()
+        self.video_safety.check.assert_not_called()
+        self.video_quality.choose.assert_not_called()
+        self.speech_to_text.transcribe.assert_not_called()
+        media_factory.assert_not_called()
+
+    def test_storyboard_stop_requires_a_safe_storyboard(self):
+        self.text_safety.check.side_effect = (
+            lambda stage, text: SafetyResult(stage == "outline", "unsafe storyboard")
+        )
+        with self.assertRaisesRegex(HumanInterventionRequired, "storyboard"):
+            self.workflow.run(["apple"], self.output, stop_after="storyboard")
+
+        self.assertTrue((self.output / "outline.txt").is_file())
+        self.assertFalse((self.output / "storyboard.txt").exists())
+        self.video.generate.assert_not_called()
+        self.media.extract_audio.assert_not_called()
+
+    def test_invalid_stop_stage_is_rejected_before_output_or_providers(self):
+        for stage in ("outline", "full", "", None):
+            with self.subTest(stage=stage), self.assertRaisesRegex(ValueError, "stop_after"):
+                self.workflow.run(["apple"], self.output, stop_after=stage)
+        self.assertFalse(self.output.exists())
+        self.llm.generate_outline.assert_not_called()
 
     def test_generation_and_safety_run_sequentially_by_default(self):
         caller = current_thread()

@@ -1,13 +1,72 @@
 # vocagent
 
 A small Python implementation of [workflow.md](workflow.md), using only the
-standard library. Python 3.10+ is required. FFmpeg must be on `PATH`, with the
-`ass` filter (libass), `libx264`, and AAC support.
+standard library. Python 3.10+ is required. Qwen3 generates and judges outlines
+and storyboards through local model endpoints. Qwen3Guard screens each generated
+candidate using its native response-moderation template. Prompts are concise and
+the generation and quality agents make separate, stateless calls.
 
-LLM generation, video generation, and speech-to-text are deliberately
-unimplemented. Text safety/quality agents and specialized video safety/quality
-models are also explicit provider stubs: there are no fake safety decisions or
-model API calls in the application.
+Video generation, video safety/quality, and speech-to-text remain explicit
+provider stubs. The full video workflow additionally requires FFmpeg on `PATH`,
+with the `ass` filter (libass), `libx264`, and AAC support.
+
+## Generate through storyboard
+
+With the model services running on `hs`, open an SSH tunnel:
+
+```sh
+ssh -F ~/.ssh/config -N \
+  -L 8000:127.0.0.1:18080 -L 8001:127.0.0.1:18081 hs
+```
+
+Then, in another terminal:
+
+```sh
+python3 -m vocagent sunrise curious journey \
+  --output-dir output
+```
+
+This generates, safety-checks, and judges both stages, then writes
+`vocabulary.json`, `outline.txt`, and `storyboard.txt`. It needs no video model or
+FFmpeg. Each stage defaults to two candidates and retains the existing safety
+retry/quality selection workflow below.
+
+The default provider factory is `vocagent.qwen:create_providers`. Configuration:
+
+| Variable | Default |
+| --- | --- |
+| `QWEN_BASE_URL` | `http://127.0.0.1:8000/v1` |
+| `QWEN_MODEL` | `qwen3` |
+| `QWEN_GUARD_BASE_URL` | `http://127.0.0.1:8001/v1` |
+| `QWEN_GUARD_MODEL` | `qwen3-guard` |
+| `QWEN_API_KEY`, `QWEN_GUARD_API_KEY` | empty; optional separate Bearer tokens |
+| `QWEN_TIMEOUT_SECONDS`, `QWEN_GUARD_TIMEOUT_SECONDS` | `120` each |
+
+When running directly on `hs`, use base URLs with ports `18080` and `18081`.
+The services bind to host loopback; remote access uses SSH.
+See [deployment instructions](deploy/README.md) for the GPU configuration,
+checkpoint provenance, and service commands.
+
+Only a complete, valid `Safe` verdict passes. `Unsafe` and `Controversial`
+verdicts provide category feedback for regeneration. Transport errors, malformed
+verdicts, truncated completions, and invalid judge selections stop the workflow.
+Qwen3Guard supplies the moderation policy; the application does not substitute
+keyword checks. Its documented format is in the
+[official model card](https://huggingface.co/Qwen/Qwen3Guard-Gen-8B).
+
+Python callers can stop at the same boundary:
+
+```python
+from vocagent.pipeline import Workflow
+from vocagent.qwen import create_providers
+
+result = Workflow(create_providers()).run(
+    ["sunrise", "curious"], "output", stop_after="storyboard"
+)
+print(result.storyboard)
+```
+
+`StoryboardResult` contains the selected outline and storyboard paths.
 
 ## Workflow
 
@@ -44,7 +103,7 @@ not implemented.
 
 ## Connect providers
 
-Implement the methods in
+To extend the workflow beyond storyboard, implement the remaining methods in
 [`vocagent/providers.py`](vocagent/providers.py).
 You can subclass the stubs or supply objects with matching methods. A video
 provider must write a nonempty video with an audio track to the requested path.
@@ -92,8 +151,12 @@ still gets at most four generation/safety attempts.
 
 Add `--concurrent-candidates` to enable concurrent candidate generation.
 
-Without `--providers`, the CLI uses the stubs and stops at the first LLM call
-with a clear unimplemented message. Exit codes are `0` for success, `1` for
+The CLI defaults to `storyboard` with the built-in Qwen text providers, including
+when their factory is explicitly supplied with `--providers`. Custom provider
+factories default to `video`. Use `--stop-after` to override either default.
+The Python `Workflow.run()` API keeps its `video` default; pass
+`stop_after="storyboard"` when using the supplied text providers.
+Exit codes are `0` for success, `1` for
 provider/configuration/media errors, and `2` when all candidates fail safety and
 human intervention is required or CLI arguments are invalid. The output directory
 must be new or empty.

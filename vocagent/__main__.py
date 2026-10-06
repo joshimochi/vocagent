@@ -1,13 +1,17 @@
-"""Command-line entry point; load user-supplied providers from a Python module."""
+"""Command-line entry point with Qwen text providers and optional custom providers."""
 
 import argparse
 import importlib
 import sys
 from pathlib import Path
 
+from .models import StoryboardResult
 from .pipeline import Workflow
 from .providers import Providers
 from .selection import HumanInterventionRequired
+
+
+DEFAULT_PROVIDER_FACTORY = "vocagent.qwen:create_providers"
 
 
 def positive_integer(value: str) -> int:
@@ -33,13 +37,17 @@ def load_providers(spec: str) -> Providers:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        prog="vocagent", description="Generate a subtitled video from vocabulary.",
+        prog="vocagent", description="Generate a storyboard or subtitled video from vocabulary.",
     )
     parser.add_argument("vocabulary", nargs="+", help="Words or quoted phrases to include")
     parser.add_argument("--output-dir", type=Path, default=Path("output"),
                         help="New or empty output directory (default: output)")
     parser.add_argument("--providers", metavar="MODULE:FACTORY",
-                        help="Factory returning configured Providers; defaults to unimplemented stubs")
+                        default=DEFAULT_PROVIDER_FACTORY,
+                        help="Provider factory (default: vocagent.qwen:create_providers)")
+    parser.add_argument("--stop-after", choices=("storyboard", "video"),
+                        help="Last stage to run (default: storyboard for built-in Qwen providers; "
+                             "video for custom providers)")
     parser.add_argument("--outline-candidate-count", type=positive_integer, default=2,
                         help="Number of outline candidate slots (default: 2)")
     parser.add_argument("--storyboard-candidate-count", type=positive_integer, default=2,
@@ -49,15 +57,18 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--concurrent-candidates", action="store_true",
                         help="Generate candidate slots concurrently (default: sequential)")
     args = parser.parse_args(argv)
+    stop_after = args.stop_after or (
+        "storyboard" if args.providers == DEFAULT_PROVIDER_FACTORY else "video"
+    )
     try:
-        providers = load_providers(args.providers) if args.providers else Providers()
+        providers = load_providers(args.providers)
         result = Workflow(
             providers,
             outline_candidate_count=args.outline_candidate_count,
             storyboard_candidate_count=args.storyboard_candidate_count,
             video_candidate_count=args.video_candidate_count,
             concurrent_candidates=args.concurrent_candidates,
-        ).run(args.vocabulary, args.output_dir)
+        ).run(args.vocabulary, args.output_dir, stop_after=stop_after)
     except HumanInterventionRequired as exc:
         print(f"Human intervention required: {exc}", file=sys.stderr)
         return 2
@@ -65,7 +76,7 @@ def main(argv: list[str] | None = None) -> int:
             ImportError, AttributeError) as exc:
         print(f"Workflow stopped: {exc}", file=sys.stderr)
         return 1
-    print(result.final_video)
+    print(result.storyboard if isinstance(result, StoryboardResult) else result.final_video)
     return 0
 
 
