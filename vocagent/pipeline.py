@@ -18,9 +18,9 @@ class Workflow:
         providers: Providers,
         media: FFmpegMedia | None = None,
         *,
-        outline_candidate_count: int = 4,
-        storyboard_candidate_count: int = 4,
-        video_candidate_count: int = 4,
+        outline_candidate_count: int = 2,
+        storyboard_candidate_count: int = 2,
+        video_candidate_count: int = 2,
         concurrent_candidates: bool = False,
     ):
         for name, count in (

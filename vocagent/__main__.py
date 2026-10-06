@@ -40,12 +40,12 @@ def main(argv: list[str] | None = None) -> int:
                         help="New or empty output directory (default: output)")
     parser.add_argument("--providers", metavar="MODULE:FACTORY",
                         help="Factory returning configured Providers; defaults to unimplemented stubs")
-    parser.add_argument("--outline-candidate-count", type=positive_integer, default=4,
-                        help="Number of outline candidate slots (default: 4)")
-    parser.add_argument("--storyboard-candidate-count", type=positive_integer, default=4,
-                        help="Number of storyboard candidate slots (default: 4)")
-    parser.add_argument("--video-candidate-count", type=positive_integer, default=4,
-                        help="Number of video candidate slots (default: 4)")
+    parser.add_argument("--outline-candidate-count", type=positive_integer, default=2,
+                        help="Number of outline candidate slots (default: 2)")
+    parser.add_argument("--storyboard-candidate-count", type=positive_integer, default=2,
+                        help="Number of storyboard candidate slots (default: 2)")
+    parser.add_argument("--video-candidate-count", type=positive_integer, default=2,
+                        help="Number of video candidate slots (default: 2)")
     parser.add_argument("--concurrent-candidates", action="store_true",
                         help="Generate candidate slots concurrently (default: sequential)")
     args = parser.parse_args(argv)

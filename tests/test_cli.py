@@ -41,7 +41,7 @@ class CLITests(unittest.TestCase):
         self.assertEqual(status, 2)
         self.assertIn("Human intervention required:", stderr.getvalue())
         self.assertIn("outline", stderr.getvalue())
-        self.assertEqual(llm.generate_outline.call_count, 16)
+        self.assertEqual(llm.generate_outline.call_count, 8)
 
     def test_success_prints_final_path_and_passes_cli_arguments(self):
         providers = Providers()
@@ -57,8 +57,8 @@ class CLITests(unittest.TestCase):
         self.assertEqual(status, 0)
         load.assert_called_once_with("example:build")
         workflow.assert_called_once_with(
-            providers, outline_candidate_count=4, storyboard_candidate_count=4,
-            video_candidate_count=4, concurrent_candidates=False,
+            providers, outline_candidate_count=2, storyboard_candidate_count=2,
+            video_candidate_count=2, concurrent_candidates=False,
         )
         workflow.return_value.run.assert_called_once_with(
             ["apple", "green pear"], Path("chosen-output"),
@@ -125,8 +125,8 @@ class CLITests(unittest.TestCase):
 
         self.assertEqual(status, 0)
         workflow.assert_called_once_with(
-            providers, outline_candidate_count=4, storyboard_candidate_count=4,
-            video_candidate_count=4, concurrent_candidates=True,
+            providers, outline_candidate_count=2, storyboard_candidate_count=2,
+            video_candidate_count=2, concurrent_candidates=True,
         )
 
     def test_provider_load_failure_is_a_clear_cli_error(self):

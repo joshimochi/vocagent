@@ -22,7 +22,7 @@ def select_candidate(
     check_safety: Callable[[T], SafetyResult],
     choose_best: Callable[[Sequence[T]], int],
     pass_feedback: bool,
-    candidate_count: int = 4,
+    candidate_count: int = 2,
     concurrent_candidates: bool = False,
 ) -> T:
     """Choose among configurable slots with up to four safety attempts each.

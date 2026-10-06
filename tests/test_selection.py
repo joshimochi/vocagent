@@ -12,23 +12,23 @@ from vocagent.selection import (
 
 
 class SelectionTests(unittest.TestCase):
-    def test_all_four_safe_slots_reach_independent_quality_judge(self):
+    def test_both_default_safe_slots_reach_independent_quality_judge(self):
         generate = Mock(side_effect=lambda slot, attempt, feedback: f"slot {slot}")
         check = Mock(return_value=SafetyResult(True))
-        judge = Mock(return_value=2)
+        judge = Mock(return_value=1)
 
         result = select_candidate(
             stage="outline", generate=generate, check_safety=check,
             choose_best=judge, pass_feedback=True,
         )
 
-        self.assertEqual(result, "slot 3")
+        self.assertEqual(result, "slot 2")
         self.assertCountEqual(
             generate.call_args_list,
-            [((slot, 1, None),) for slot in range(1, 5)],
+            [((slot, 1, None),) for slot in range(1, 3)],
         )
-        self.assertEqual(check.call_count, 4)
-        judge.assert_called_once_with(("slot 1", "slot 2", "slot 3", "slot 4"))
+        self.assertEqual(check.call_count, 2)
+        judge.assert_called_once_with(("slot 1", "slot 2"))
 
     def test_text_retries_receive_latest_reason_and_reset_for_next_slot(self):
         calls = []
@@ -53,9 +53,8 @@ class SelectionTests(unittest.TestCase):
         self.assertEqual(calls, [
             (1, 1, None), (1, 2, "unsafe attempt 1"),
             (1, 3, "unsafe attempt 2"), (2, 1, None),
-            (3, 1, None), (4, 1, None),
         ])
-        judge.assert_called_once_with(((1, 3), (2, 1), (3, 1), (4, 1)))
+        judge.assert_called_once_with(((1, 3), (2, 1)))
 
     def test_slots_generate_and_check_concurrently_with_ordered_survivors(self):
         generation_barrier = Barrier(4, timeout=5)
@@ -89,6 +88,7 @@ class SelectionTests(unittest.TestCase):
         result = select_candidate(
             stage="outline", generate=generate, check_safety=check,
             choose_best=judge, pass_feedback=True, concurrent_candidates=True,
+            candidate_count=4,
         )
 
         self.assertEqual(result, (2, 2))
@@ -109,11 +109,11 @@ class SelectionTests(unittest.TestCase):
             check_safety=lambda candidate: SafetyResult(
                 candidate[1] == 2, "unsuitable content",
             ),
-            choose_best=lambda candidates: 3, pass_feedback=False,
+            choose_best=lambda candidates: 1, pass_feedback=False,
         )
 
-        self.assertEqual(result, (4, 2))
-        self.assertEqual(generate.call_count, 8)
+        self.assertEqual(result, (2, 2))
+        self.assertEqual(generate.call_count, 4)
         self.assertTrue(all(call.args[2] is None for call in generate.call_args_list))
 
     def test_exhausted_slots_are_ignored_and_single_survivor_is_judged(self):
@@ -122,14 +122,14 @@ class SelectionTests(unittest.TestCase):
 
         result = select_candidate(
             stage="outline", generate=generate,
-            check_safety=lambda candidate: SafetyResult(candidate == (3, 4), "unsafe"),
+            check_safety=lambda candidate: SafetyResult(candidate == (2, 4), "unsafe"),
             choose_best=judge, pass_feedback=True,
         )
 
-        self.assertEqual(result, (3, 4))
-        self.assertEqual(generate.call_count, 16)
-        judge.assert_called_once_with(((3, 4),))
-        for slot in range(1, 5):
+        self.assertEqual(result, (2, 4))
+        self.assertEqual(generate.call_count, 8)
+        judge.assert_called_once_with(((2, 4),))
+        for slot in range(1, 3):
             slot_calls = [call.args for call in generate.call_args_list if call.args[0] == slot]
             self.assertEqual([call[1] for call in slot_calls], [1, 2, 3, 4])
             self.assertIsNone(slot_calls[0][2])
@@ -186,7 +186,7 @@ class SelectionTests(unittest.TestCase):
                     choose_best=lambda candidates: 0, pass_feedback=True,
                 )
                 retries = [call.args for call in generate.call_args_list if call.args[1] == 2]
-                self.assertEqual(len(retries), 4)
+                self.assertEqual(len(retries), 2)
                 for slot, attempt, feedback in retries:
                     self.assertIsInstance(feedback, str)
                     self.assertIn("safety", feedback)
@@ -196,7 +196,7 @@ class SelectionTests(unittest.TestCase):
         class IntegerSubclass(int):
             pass
 
-        for index in (-1, 4, True, False, 1.0, "1", None, IntegerSubclass(1)):
+        for index in (-1, 2, True, False, 1.0, "1", None, IntegerSubclass(1)):
             with self.subTest(index=index, type=type(index)):
                 with self.assertRaisesRegex(ValueError, "outline.*integer index"):
                     select_candidate(
@@ -209,8 +209,8 @@ class SelectionTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "0 to 0"):
             select_candidate(
                 stage="video", generate=lambda slot, attempt, feedback: slot,
-                check_safety=lambda candidate: SafetyResult(candidate == 3),
-                choose_best=lambda candidates: 2, pass_feedback=False,
+                check_safety=lambda candidate: SafetyResult(candidate == 2),
+                choose_best=lambda candidates: 1, pass_feedback=False,
             )
 
     def test_generation_errors_propagate_without_safety_retry(self):
@@ -286,8 +286,8 @@ class SelectionTests(unittest.TestCase):
             )
 
         self.assertIs(caught.exception, error)
-        self.assertEqual(generate.call_count, 4)
-        judge.assert_called_once_with(("candidate",) * 4)
+        self.assertEqual(generate.call_count, 2)
+        judge.assert_called_once_with(("candidate",) * 2)
 
 
 if __name__ == "__main__":

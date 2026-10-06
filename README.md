@@ -21,7 +21,7 @@ model API calls in the application.
 8. Burn the subtitles into the selected video with FFmpeg, preserving its audio.
 
 Each of the three generation stages has an independently configurable candidate
-count, defaulting to four. A stage fills its candidate slots sequentially by
+count, defaulting to two. A stage fills its candidate slots sequentially by
 default. Enable concurrent candidate generation to use up to its configured count
 of worker threads. Each slot gets at most four sequential generation/safety
 attempts. A safe candidate ends that slot's retries; an
@@ -87,7 +87,7 @@ python3 -m vocagent sunrise curious journey \
 ```
 
 The three candidate count flags accept positive integers and each defaults to
-`4` when omitted. They change the number of candidate slots, while each slot
+`2` when omitted. They change the number of candidate slots, while each slot
 still gets at most four generation/safety attempts.
 
 Add `--concurrent-candidates` to enable concurrent candidate generation.
@@ -115,7 +115,7 @@ print(result.final_video)
 ```
 
 The three Python keyword arguments also accept positive integers and each
-defaults to `4` when omitted. Add `concurrent_candidates=True` to the `Workflow`
+defaults to `2` when omitted. Add `concurrent_candidates=True` to the `Workflow`
 constructor to enable concurrent candidate generation.
 
 Optional installation with `python3 -m pip install -e .` adds the `vocagent`
