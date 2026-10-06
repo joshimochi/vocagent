@@ -1,4 +1,5 @@
 from pathlib import Path
+import os
 import shutil
 import subprocess
 import tempfile
@@ -88,6 +89,28 @@ class MediaTests(unittest.TestCase):
         )
         with self.assertRaisesRegex(MediaError, "requires FFmpeg built with libass"):
             self.media.burn_subtitles(self.video, self.subtitles, self.root / "final.mp4")
+
+    @unittest.skipIf(os.name == "nt", "Executable script uses a POSIX shebang")
+    def test_relative_path_entry_survives_subtitle_working_directory_change(self):
+        binary_directory = self.root / "local-tools"
+        binary_directory.mkdir()
+        executable = binary_directory / "ffmpeg"
+        executable.write_text(
+            '#!/bin/sh\nfor output in "$@"; do :; done\nprintf processed > "$output"\n',
+            encoding="utf-8",
+        )
+        executable.chmod(0o755)
+        previous_directory = Path.cwd()
+        try:
+            os.chdir(self.root)
+            with patch.dict(os.environ, {"PATH": "local-tools"}):
+                media = FFmpegMedia()
+                audio = media.extract_audio(self.video, self.root / "audio.wav")
+                output = media.burn_subtitles(self.video, self.subtitles, self.root / "final.mp4")
+        finally:
+            os.chdir(previous_directory)
+        self.assertEqual(audio.read_bytes(), b"processed")
+        self.assertEqual(output.read_bytes(), b"processed")
 
 
 @unittest.skipUnless(shutil.which("ffmpeg"), "FFmpeg is not installed")

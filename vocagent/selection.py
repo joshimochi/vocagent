@@ -15,6 +15,20 @@ class HumanInterventionRequired(RuntimeError):
     """All candidate slots failed safety checks and the workflow must stop."""
 
 
+def validate_safety_result(safety: SafetyResult, stage: str) -> SafetyResult:
+    """Reject malformed provider decisions before accepting or discarding work."""
+    if (
+        not isinstance(safety, SafetyResult)
+        or type(safety.safe) is not bool
+        or not isinstance(safety.reason, str)
+    ):
+        raise ValueError(
+            f"{stage}: the safety checker must return a SafetyResult "
+            "with a boolean safe value and a string reason."
+        )
+    return safety
+
+
 def select_candidate(
     *,
     stage: str,
@@ -46,16 +60,7 @@ def select_candidate(
                 if stopped.is_set():
                     return []
                 candidate = generate(slot, attempt, feedback)
-                safety = check_safety(candidate)
-                if (
-                    not isinstance(safety, SafetyResult)
-                    or type(safety.safe) is not bool
-                    or not isinstance(safety.reason, str)
-                ):
-                    raise ValueError(
-                        f"{stage}: the safety checker must return a SafetyResult "
-                        "with a boolean safe value and a string reason."
-                    )
+                safety = validate_safety_result(check_safety(candidate), stage)
                 if safety.safe:
                     return [candidate]
                 if pass_feedback:

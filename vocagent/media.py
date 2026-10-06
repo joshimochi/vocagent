@@ -32,13 +32,14 @@ class FFmpegMedia:
     """Extract mono speech audio and burn ASS subtitles into an MP4 video."""
 
     def __init__(self, ffmpeg: str = "ffmpeg") -> None:
-        # burn_subtitles changes cwd, so retain relative executable paths too.
+        # burn_subtitles changes cwd, so resolve explicit paths and relative
+        # PATH entries before running either media operation.
         executable = Path(ffmpeg)
-        self.ffmpeg = (
-            str(executable.resolve())
-            if "/" in ffmpeg or "\\" in ffmpeg or executable.exists()
-            else ffmpeg
-        )
+        if "/" in ffmpeg or "\\" in ffmpeg or executable.exists():
+            self.ffmpeg = str(executable.resolve())
+        else:
+            discovered = shutil.which(ffmpeg)
+            self.ffmpeg = str(Path(discovered).resolve()) if discovered else ffmpeg
 
     def _run(self, arguments: list[str], *, cwd: Path | None = None) -> None:
         try:

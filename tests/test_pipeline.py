@@ -3,7 +3,7 @@
 import json
 from pathlib import Path
 import tempfile
-from threading import Barrier, Lock, current_thread
+from threading import Barrier, Event, Lock, current_thread
 import unittest
 from unittest.mock import Mock, call, patch
 
@@ -11,7 +11,7 @@ from vocagent.media import FFmpegMedia
 from vocagent.models import SafetyResult, StoryboardResult, TranscriptSegment
 from vocagent.pipeline import Workflow
 from vocagent.providers import (
-    LLMGenerator, Providers, SpeechToText, TextQualityAgent, TextSafetyAgent,
+    AudioSafetyModel, LLMGenerator, Providers, SpeechToText, TextQualityAgent, TextSafetyAgent,
     VideoGenerator, VideoQualityModel, VideoSafetyModel,
 )
 from vocagent.selection import HumanInterventionRequired
@@ -49,6 +49,8 @@ class PipelineTests(unittest.TestCase):
         )
         self.video_safety = Mock(spec=VideoSafetyModel)
         self.video_safety.check.return_value = SafetyResult(True)
+        self.audio_safety = Mock(spec=AudioSafetyModel)
+        self.audio_safety.check.return_value = SafetyResult(True)
         self.video_quality = Mock(spec=VideoQualityModel)
         self.video_quality.choose.return_value = 1
         self.speech_to_text = Mock(spec=SpeechToText)
@@ -61,6 +63,7 @@ class PipelineTests(unittest.TestCase):
             llm=self.llm, text_safety=self.text_safety, text_quality=self.text_quality,
             video=self.video, video_safety=self.video_safety,
             video_quality=self.video_quality, speech_to_text=self.speech_to_text,
+            audio_safety=self.audio_safety,
         )
         self.media = Mock(spec=FFmpegMedia)
         self.media.extract_audio.side_effect = (
@@ -72,7 +75,7 @@ class PipelineTests(unittest.TestCase):
         )
         self.workflow = Workflow(self.providers, self.media)
 
-    def test_chosen_candidates_flow_through_all_eight_steps(self):
+    def test_chosen_candidates_flow_through_the_complete_workflow(self):
         result = self.workflow.run([" apple ", "pear"], self.output)
 
         words = ("apple", "pear")
@@ -102,8 +105,19 @@ class PipelineTests(unittest.TestCase):
         )
         self.video_quality.choose.assert_called_once_with(chosen_storyboard, videos)
         self.assertEqual(result.selected_video, videos[1])
-        self.media.extract_audio.assert_called_once_with(videos[1], result.audio)
-        self.speech_to_text.transcribe.assert_called_once_with(result.audio)
+        self.assertCountEqual(
+            self.media.extract_audio.call_args_list,
+            [call(video, video.with_suffix(".wav")) for video in videos],
+        )
+        self.assertCountEqual(
+            self.speech_to_text.transcribe.call_args_list,
+            [call(video.with_suffix(".wav")) for video in videos],
+        )
+        self.assertCountEqual(self.video_safety.check.call_args_list, [call(v) for v in videos])
+        self.assertEqual(
+            self.audio_safety.check.call_args_list,
+            [call("Hello, apple.\nA green pear. 梨")] * 2,
+        )
         self.media.burn_subtitles.assert_called_once_with(
             videos[1], result.subtitles, result.final_video,
         )
@@ -120,6 +134,22 @@ class PipelineTests(unittest.TestCase):
         self.assertIn("0:00:02.00,0:00:03.75", subtitles)
         self.assertIn("A green pear. 梨", subtitles)
         self.assertEqual(result.audio.read_bytes(), b"fake audio")
+        for video in videos:
+            self.assertEqual(video.with_suffix(".wav").read_bytes(), b"fake audio")
+            self.assertEqual(video.with_suffix(".json").read_bytes(), result.transcript.read_bytes())
+        self.assertEqual(result.final_video.read_bytes(), b"fake subtitled video")
+
+    def test_full_workflow_uses_default_media_for_each_video_candidate(self):
+        with patch("vocagent.pipeline.FFmpegMedia", return_value=self.media) as media_factory:
+            result = Workflow(self.providers).run(["apple", "pear"], self.output)
+
+        media_factory.assert_called_once_with()
+        self.assertEqual(self.media.extract_audio.call_count, 2)
+        self.assertEqual(self.speech_to_text.transcribe.call_count, 2)
+        self.assertEqual(self.audio_safety.check.call_count, 2)
+        self.media.burn_subtitles.assert_called_once_with(
+            result.selected_video, result.subtitles, result.final_video,
+        )
         self.assertEqual(result.final_video.read_bytes(), b"fake subtitled video")
 
     def test_storyboard_stop_saves_selected_safe_text_without_video_or_media(self):
@@ -146,6 +176,7 @@ class PipelineTests(unittest.TestCase):
         ])
         self.video.generate.assert_not_called()
         self.video_safety.check.assert_not_called()
+        self.audio_safety.check.assert_not_called()
         self.video_quality.choose.assert_not_called()
         self.speech_to_text.transcribe.assert_not_called()
         media_factory.assert_not_called()
@@ -177,7 +208,10 @@ class PipelineTests(unittest.TestCase):
             ("storyboard", self.llm.generate_storyboard),
             ("video", self.video.generate),
             ("text safety", self.text_safety.check),
+            ("extract audio", self.media.extract_audio),
+            ("transcribe", self.speech_to_text.transcribe),
             ("video safety", self.video_safety.check),
+            ("audio safety", self.audio_safety.check),
         ):
             original = method.side_effect
             result = method.return_value
@@ -208,7 +242,8 @@ class PipelineTests(unittest.TestCase):
                 self.assertEqual(events, (
                     ["outline", "text safety"] * counts.get("outline_candidate_count", 2)
                     + ["storyboard", "text safety"] * counts.get("storyboard_candidate_count", 2)
-                    + ["video", "video safety"] * counts.get("video_candidate_count", 2)
+                    + ["video", "extract audio", "transcribe", "video safety", "audio safety"]
+                    * counts.get("video_candidate_count", 2)
                 ))
 
     def test_both_default_generations_overlap_in_each_stage_when_enabled(self):
@@ -313,10 +348,11 @@ class PipelineTests(unittest.TestCase):
 
     def test_unsafe_video_is_deleted_before_regeneration_without_feedback(self):
         rejected = self.output / "video_candidates" / "candidate-1-attempt-1.mp4"
+        rejected_artifacts = [rejected.with_suffix(suffix) for suffix in (".mp4", ".wav", ".json")]
 
         def generate(storyboard, output_path):
             if output_path.name == "candidate-1-attempt-2.mp4":
-                self.assertFalse(rejected.exists())
+                self.assertTrue(all(not path.exists() for path in rejected_artifacts))
             output_path.write_bytes(b"fake video")
 
         self.video.generate.side_effect = generate
@@ -326,8 +362,11 @@ class PipelineTests(unittest.TestCase):
 
         result = self.workflow.run(["apple"], self.output)
 
-        self.assertFalse(rejected.exists())
+        self.assertTrue(all(not path.exists() for path in rejected_artifacts))
         self.assertEqual(self.video.generate.call_count, 3)
+        self.assertEqual(self.media.extract_audio.call_count, 3)
+        self.assertEqual(self.speech_to_text.transcribe.call_count, 3)
+        self.assertEqual(self.audio_safety.check.call_count, 3)
         self.assertTrue(all(len(item.args) == 2 for item in self.video.generate.call_args_list))
         self.assertTrue(all(item.args[0] == result.storyboard.read_text()
                             for item in self.video.generate.call_args_list))
@@ -335,6 +374,131 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(len(survivors), 2)
         self.assertNotIn(rejected, survivors)
         self.assertEqual(survivors[0].name, "candidate-1-attempt-2.mp4")
+
+    def test_unsafe_audio_retries_and_removes_all_attempt_artifacts(self):
+        rejected = self.output / "video_candidates" / "candidate-1-attempt-1.mp4"
+
+        def generate(storyboard, output_path):
+            if output_path.name == "candidate-1-attempt-2.mp4":
+                for suffix in (".mp4", ".wav", ".json"):
+                    self.assertFalse(rejected.with_suffix(suffix).exists())
+            output_path.write_bytes(b"fake video")
+
+        self.video.generate.side_effect = generate
+        self.speech_to_text.transcribe.side_effect = lambda path: [
+            TranscriptSegment(0, 1, path.stem),
+        ]
+        self.audio_safety.check.side_effect = lambda text: SafetyResult(
+            text != rejected.stem, "do not forward this feedback to generation",
+        )
+
+        result = self.workflow.run(["apple"], self.output)
+
+        survivors = self.video_quality.choose.call_args.args[1]
+        self.assertEqual([video.name for video in survivors], [
+            "candidate-1-attempt-2.mp4", "candidate-2-attempt-1.mp4",
+        ])
+        self.assertEqual(self.video.generate.call_count, 3)
+        self.assertEqual(self.video_safety.check.call_count, 3)
+        self.assertEqual(self.audio_safety.check.call_count, 3)
+        self.assertEqual(self.speech_to_text.transcribe.call_count, 3)
+        for generated in self.video.generate.call_args_list:
+            self.assertEqual(len(generated.args), 2)
+            self.assertEqual(generated.args[0], result.storyboard.read_text())
+        for suffix in (".mp4", ".wav", ".json"):
+            self.assertFalse(rejected.with_suffix(suffix).exists())
+
+    def test_winner_reuses_its_own_audio_and_original_transcript_for_subtitles(self):
+        def extract(video, audio):
+            audio.write_bytes(video.stem.encode())
+
+        def transcribe(audio):
+            # One-shot iterators catch attempts to consume STT results again.
+            return iter([
+                TranscriptSegment(0.5, 1.25, f"{audio.read_text()} apple 梨"),
+                TranscriptSegment(2.0, 3.0, "The exact checked ending."),
+            ])
+
+        self.media.extract_audio.side_effect = extract
+        self.speech_to_text.transcribe.side_effect = transcribe
+
+        result = self.workflow.run(["apple"], self.output)
+
+        winner = result.selected_video
+        self.assertEqual(winner.name, "candidate-2-attempt-1.mp4")
+        self.assertEqual(self.speech_to_text.transcribe.call_count, 2)
+        self.assertEqual(result.audio.read_bytes(), winner.with_suffix(".wav").read_bytes())
+        self.assertEqual(result.audio.read_text(), winner.stem)
+        self.assertEqual(result.transcript.read_bytes(), winner.with_suffix(".json").read_bytes())
+        transcript = json.loads(result.transcript.read_text())
+        self.assertEqual(transcript, [
+            {"start": 0.5, "end": 1.25, "text": f"{winner.stem} apple 梨"},
+            {"start": 2.0, "end": 3.0, "text": "The exact checked ending."},
+        ])
+        subtitles = result.subtitles.read_text()
+        self.assertIn(f"{winner.stem} apple 梨", subtitles)
+        self.assertIn("0:00:00.50,0:00:01.25", subtitles)
+        self.assertIn("The exact checked ending.", subtitles)
+        self.assertNotIn("candidate-1-attempt-1", subtitles)
+        self.assertEqual(self.audio_safety.check.call_args_list, [
+            call(f"candidate-{slot}-attempt-1 apple 梨\nThe exact checked ending.")
+            for slot in (1, 2)
+        ])
+
+    def test_concurrent_candidates_isolate_audio_and_transcripts_and_preserve_slot_order(self):
+        extract_barrier = Barrier(2, timeout=5)
+        transcribe_barrier = Barrier(2, timeout=5)
+        visual_barrier = Barrier(2, timeout=5)
+        audio_barrier = Barrier(2, timeout=5)
+        second_checked = Event()
+        completed = []
+        completed_lock = Lock()
+
+        def extract(video, audio):
+            self.assertEqual(audio, video.with_suffix(".wav"))
+            extract_barrier.wait()
+            audio.write_bytes(video.stem.encode())
+
+        def transcribe(audio):
+            transcribe_barrier.wait()
+            self.assertEqual(audio.read_text(), audio.stem)
+            return [TranscriptSegment(0.25, 1.5, f"Spoken by {audio.stem}.")]
+
+        def check_visual(video):
+            visual_barrier.wait()
+            transcript = json.loads(video.with_suffix(".json").read_text())
+            self.assertEqual(transcript[0]["text"], f"Spoken by {video.stem}.")
+            return SafetyResult(True)
+
+        def check_audio(text):
+            audio_barrier.wait()
+            if "candidate-1-" in text:
+                self.assertTrue(second_checked.wait(timeout=5))
+            with completed_lock:
+                completed.append(text)
+            if "candidate-2-" in text:
+                second_checked.set()
+            return SafetyResult(True)
+
+        self.media.extract_audio.side_effect = extract
+        self.speech_to_text.transcribe.side_effect = transcribe
+        self.video_safety.check.side_effect = check_visual
+        self.audio_safety.check.side_effect = check_audio
+        workflow = Workflow(self.providers, self.media, concurrent_candidates=True)
+
+        result = workflow.run(["apple"], self.output)
+
+        self.assertEqual(completed, [
+            "Spoken by candidate-2-attempt-1.", "Spoken by candidate-1-attempt-1.",
+        ])
+        survivors = self.video_quality.choose.call_args.args[1]
+        self.assertEqual([video.name for video in survivors], [
+            "candidate-1-attempt-1.mp4", "candidate-2-attempt-1.mp4",
+        ])
+        self.assertEqual(self.speech_to_text.transcribe.call_count, 2)
+        self.assertEqual(result.audio.read_text(), "candidate-2-attempt-1")
+        self.assertIn("Spoken by candidate-2-attempt-1.", result.subtitles.read_text())
+        self.assertNotIn("candidate-1-attempt-1", result.subtitles.read_text())
 
     def test_all_unsafe_outline_stops_before_storyboard(self):
         self.text_safety.check.return_value = SafetyResult(False, "unsafe outline")
@@ -361,7 +525,7 @@ class PipelineTests(unittest.TestCase):
         self.video.generate.assert_not_called()
         self.media.extract_audio.assert_not_called()
 
-    def test_all_unsafe_videos_are_removed_and_stop_before_audio(self):
+    def test_all_unsafe_videos_are_removed_and_stop_before_quality_and_subtitles(self):
         self.video_safety.check.return_value = SafetyResult(False, "unsafe video")
 
         with self.assertRaisesRegex(HumanInterventionRequired, "video"):
@@ -370,8 +534,23 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(self.video.generate.call_count, 8)
         self.assertEqual(list((self.output / "video_candidates").iterdir()), [])
         self.video_quality.choose.assert_not_called()
-        self.media.extract_audio.assert_not_called()
-        self.speech_to_text.transcribe.assert_not_called()
+        self.assertEqual(self.media.extract_audio.call_count, 8)
+        self.assertEqual(self.speech_to_text.transcribe.call_count, 8)
+        self.assertEqual(self.audio_safety.check.call_count, 8)
+        self.media.burn_subtitles.assert_not_called()
+
+    def test_all_unsafe_audio_exhausts_four_attempts_per_slot_and_removes_artifacts(self):
+        self.audio_safety.check.return_value = SafetyResult(False, "unsafe speech")
+
+        with self.assertRaisesRegex(HumanInterventionRequired, "video"):
+            self.workflow.run(["apple"], self.output)
+
+        self.assertEqual(self.video.generate.call_count, 8)
+        self.assertEqual(self.video_safety.check.call_count, 8)
+        self.assertEqual(self.audio_safety.check.call_count, 8)
+        self.assertEqual(self.speech_to_text.transcribe.call_count, 8)
+        self.assertEqual(list((self.output / "video_candidates").iterdir()), [])
+        self.video_quality.choose.assert_not_called()
         self.media.burn_subtitles.assert_not_called()
 
     def test_invalid_vocabulary_does_not_create_output_or_call_providers(self):
@@ -430,6 +609,94 @@ class PipelineTests(unittest.TestCase):
                     self.workflow.run(["apple"], output)
                 self.assertFalse((output / "transcript.json").exists())
                 self.assertFalse((output / "subtitles.ass").exists())
+                candidate = output / "video_candidates" / "candidate-1-attempt-1.mp4"
+                self.assertTrue(candidate.is_file())
+                self.assertTrue(candidate.with_suffix(".wav").is_file())
+                self.assertFalse(candidate.with_suffix(".json").exists())
+        self.video_safety.check.assert_not_called()
+        self.audio_safety.check.assert_not_called()
+        self.video_quality.choose.assert_not_called()
+        self.media.burn_subtitles.assert_not_called()
+
+    def test_malformed_safety_results_stop_without_retrying_or_deleting_artifacts(self):
+        malformed_results = (
+            None, {"safe": True}, True,
+            SafetyResult(1), SafetyResult("false"),
+            SafetyResult(True, None), SafetyResult(False, 123),
+        )
+        for checker_name in ("visual", "audio"):
+            for index, invalid in enumerate(malformed_results):
+                with self.subTest(checker=checker_name, invalid=invalid):
+                    self.video.generate.reset_mock()
+                    self.video_safety.check.reset_mock()
+                    self.audio_safety.check.reset_mock()
+                    self.video_safety.check.return_value = SafetyResult(True)
+                    self.audio_safety.check.return_value = SafetyResult(True)
+                    checker = (self.video_safety if checker_name == "visual"
+                               else self.audio_safety)
+                    checker.check.return_value = invalid
+                    output = self.output / checker_name / str(index)
+
+                    with self.assertRaisesRegex(ValueError, "SafetyResult"):
+                        self.workflow.run(["apple"], output)
+
+                    self.video.generate.assert_called_once()
+                    checker.check.assert_called_once()
+                    candidate = output / "video_candidates" / "candidate-1-attempt-1.mp4"
+                    for suffix in (".mp4", ".wav", ".json"):
+                        self.assertTrue(candidate.with_suffix(suffix).is_file())
+                    self.assertFalse((output / "audio.wav").exists())
+                    self.assertFalse((output / "transcript.json").exists())
+        self.video_quality.choose.assert_not_called()
+        self.media.burn_subtitles.assert_not_called()
+
+    def test_visual_rejection_does_not_hide_an_invalid_audio_assessment(self):
+        self.video_safety.check.return_value = SafetyResult(False, "unsafe visuals")
+        self.audio_safety.check.return_value = SafetyResult(True, None)
+
+        with self.assertRaisesRegex(ValueError, "SafetyResult"):
+            self.workflow.run(["apple"], self.output)
+
+        self.video.generate.assert_called_once()
+        self.video_safety.check.assert_called_once()
+        self.audio_safety.check.assert_called_once()
+        candidate = self.output / "video_candidates" / "candidate-1-attempt-1.mp4"
+        for suffix in (".mp4", ".wav", ".json"):
+            self.assertTrue(candidate.with_suffix(suffix).is_file())
+        self.video_quality.choose.assert_not_called()
+        self.media.burn_subtitles.assert_not_called()
+
+    def test_transcription_and_safety_provider_errors_stop_before_quality_without_retry(self):
+        for stage, method in (
+            ("transcription", self.speech_to_text.transcribe),
+            ("visual", self.video_safety.check),
+            ("audio", self.audio_safety.check),
+        ):
+            with self.subTest(stage=stage):
+                self.video.generate.reset_mock()
+                self.speech_to_text.transcribe.reset_mock()
+                self.video_safety.check.reset_mock()
+                self.audio_safety.check.reset_mock()
+                failure = RuntimeError(f"{stage} unavailable")
+                method.side_effect = failure
+                output = self.output / stage
+
+                with self.assertRaises(RuntimeError) as raised:
+                    self.workflow.run(["apple"], output)
+
+                self.assertIs(raised.exception, failure)
+                self.video.generate.assert_called_once()
+                method.assert_called_once()
+                candidate = output / "video_candidates" / "candidate-1-attempt-1.mp4"
+                self.assertTrue(candidate.is_file())
+                self.assertTrue(candidate.with_suffix(".wav").is_file())
+                self.assertEqual(candidate.with_suffix(".json").is_file(), stage != "transcription")
+                if stage == "transcription":
+                    self.video_safety.check.assert_not_called()
+                    self.audio_safety.check.assert_not_called()
+                self.assertFalse((output / "audio.wav").exists())
+                method.side_effect = None
+        self.video_quality.choose.assert_not_called()
         self.media.burn_subtitles.assert_not_called()
 
 
