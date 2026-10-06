@@ -2,10 +2,11 @@
 
 Generation, safety assessment, and quality selection are separate dependencies.
 Text safety and quality must use agents separate from the generating agent;
-video safety and quality must use specialized models.
+visual safety and video quality must use specialized models. Audio safety uses
+a separate model to assess the transcript of each generated video.
 Candidate slots run sequentially by default. When concurrent candidate generation
-is enabled, generation and safety methods must support concurrent calls on the
-same instance, up to the stage's configured candidate count (two by default).
+is enabled, generation, transcription, and safety methods must support concurrent
+calls on the same instance, up to the stage's configured candidate count (two by default).
 Quality judging runs after all candidate slots finish.
 """
 
@@ -49,7 +50,14 @@ class VideoGenerator:
 
 class VideoSafetyModel:
     def check(self, video_path: Path) -> SafetyResult:
+        """Assess visual content; spoken content is checked by AudioSafetyModel."""
         raise NotImplementedError("Implement a specialized VideoSafetyModel.check")
+
+
+class AudioSafetyModel:
+    def check(self, transcript: str) -> SafetyResult:
+        """Assess spoken content from the complete, newline-joined transcript."""
+        raise NotImplementedError("Implement a separate AudioSafetyModel.check")
 
 
 class VideoQualityModel:
@@ -73,3 +81,4 @@ class Providers:
     video_safety: VideoSafetyModel = field(default_factory=VideoSafetyModel)
     video_quality: VideoQualityModel = field(default_factory=VideoQualityModel)
     speech_to_text: SpeechToText = field(default_factory=SpeechToText)
+    audio_safety: AudioSafetyModel = field(default_factory=AudioSafetyModel)

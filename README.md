@@ -5,20 +5,23 @@ standard library. Python 3.10+ is required. FFmpeg must be on `PATH`, with the
 `ass` filter (libass), `libx264`, and AAC support.
 
 LLM generation, video generation, and speech-to-text are deliberately
-unimplemented. Text safety/quality agents and specialized video safety/quality
-models are also explicit provider stubs: there are no fake safety decisions or
-model API calls in the application.
+unimplemented. Text safety/quality agents, visual safety/quality models, and a
+separate transcript-based audio safety model are also explicit provider stubs:
+there are no fake safety decisions or model API calls in the application.
 
 ## Workflow
 
 1. Accept vocabulary words or phrases.
 2. Generate and select a story outline.
 3. Generate and select a storyboard from the selected outline.
-4. Generate and select a video from the selected storyboard.
-5. Extract mono, 16 kHz PCM audio with FFmpeg.
-6. Transcribe audio into timestamped segments using the supplied provider.
-7. Write ASS subtitles using those timestamps.
-8. Burn the subtitles into the selected video with FFmpeg, preserving its audio.
+4. For each video attempt, generate a video from the selected storyboard, extract
+   mono, 16 kHz PCM audio with FFmpeg, and transcribe it into validated timestamped
+   segments. Save the audio and transcript alongside that candidate.
+5. Check the video's visuals and its audio transcript with separate safety models.
+   Select the best video from the candidates that pass both checks.
+6. Reuse the selected candidate's audio and transcript, and write ASS subtitles
+   using the original segment timestamps.
+7. Burn the subtitles into the selected video with FFmpeg, preserving its audio.
 
 Each of the three generation stages has an independently configurable candidate
 count, defaulting to two. A stage fills its candidate slots sequentially by
@@ -30,15 +33,17 @@ the safe candidates in slot order, even if only one survived. If none survived,
 the workflow raises `HumanInterventionRequired` and stops before the next stage.
 
 For text, the preceding safety failure reason is passed to the next attempt in
-the same slot. Video safety failures cause the generated file to be deleted and
-the slot retried without feedback. Generation, safety, and judging are separate
-dependencies. Supply separate agents for text generation, safety, and quality,
-and specialized models for video safety and quality.
+the same slot. Each successfully transcribed video attempt runs both visual and
+audio safety checks. Failure of either check deletes that attempt's video, audio,
+and transcript, and retries the slot without feedback. Generation, safety, and
+judging are separate dependencies. Supply separate agents for text generation,
+safety, and quality, and specialized models for visual safety, audio safety, and
+video quality.
 
-Provider and FFmpeg errors stop the run; they are not silently classified as
-unsafe candidates or retried. A generation or safety error stops new attempts;
-already-started attempts finish before the error is raised. Successful earlier
-artifacts remain available for inspection after a failure. After human
+Provider, transcript validation, and FFmpeg errors stop the run; they are not
+silently classified as unsafe candidates or retried. An error stops new attempts;
+already-started attempts finish before the error is raised. Earlier artifacts
+remain available for inspection after a failure. After human
 intervention, start a new run in a new or empty directory; automatic resume is
 not implemented.
 
@@ -48,15 +53,21 @@ Implement the methods in
 [`vocagent/providers.py`](vocagent/providers.py).
 You can subclass the stubs or supply objects with matching methods. A video
 provider must write a nonempty video with an audio track to the requested path.
-When concurrent candidate generation is enabled, generation and safety providers
-must be thread-safe for up to the configured candidate count of concurrent calls
-on the same instance for each stage. Each video attempt receives a distinct
-output path. Each stage's quality judge runs once after all slots finish;
-workflow stages remain sequential.
+When concurrent candidate generation is enabled, generation, safety,
+speech-to-text, and media implementations must be thread-safe for up to the
+configured candidate count of concurrent calls on the same instance for each
+stage. Each video attempt receives distinct video, audio, and transcript paths.
+Each stage's quality judge runs once after all slots finish; workflow stages
+remain sequential.
 Safety providers return `SafetyResult(safe=True)` or
 `SafetyResult(safe=False, reason="...")`. Quality providers return a zero-based
 index into the safe candidates passed to them. Speech-to-text returns
 `TranscriptSegment(start=0.0, end=1.5, text="...")` objects with times in seconds.
+`VideoSafetyModel.check(video_path)` assesses the visuals;
+`AudioSafetyModel.check(transcript)` assesses spoken content from a string formed
+by joining the segment texts with newlines. It receives neither raw audio nor
+timestamped objects. An audio safety implementation is required: the default
+stub raises an unimplemented error instead of passing the candidate.
 
 Create a module such as `my_providers.py` with a factory that returns a
 `Providers` instance containing your implementations:
@@ -74,6 +85,7 @@ def create_providers():
         video_safety=MyVideoSafetyModel(),
         video_quality=MyVideoQualityModel(),
         speech_to_text=MySpeechToText(),
+        audio_safety=MyAudioSafetyModel(),
     )
 ```
 
@@ -118,16 +130,47 @@ The three Python keyword arguments also accept positive integers and each
 defaults to `2` when omitted. Add `concurrent_candidates=True` to the `Workflow`
 constructor to enable concurrent candidate generation.
 
-Optional installation with `python3 -m pip install -e .` adds the `vocagent`
-command. There are no Python runtime dependencies.
+## macOS and Linux setup
+
+Use Python 3.10+ and an FFmpeg build with the `ass` filter (libass), `libx264`,
+and AAC support. Install them through your system's package manager if needed,
+along with a font suitable for your subtitle language. FFmpeg and pip are not
+bundled with this repository. Use `python3` consistently,
+since a `python` command is not present on every system. Check the prerequisites:
+
+```sh
+python3 --version
+ffmpeg -version
+ffmpeg -hide_banner -h filter=ass
+ffmpeg -hide_banner -h encoder=libx264
+ffmpeg -hide_banner -h encoder=aac
+```
+
+Running `python3 -m vocagent` from the repository root requires no installation
+and no Python runtime dependencies. To optionally install the `vocagent` command,
+create a virtual environment:
+
+```sh
+python3 -m venv .venv
+. .venv/bin/activate
+python3 -m pip install -e .
+```
+
+If creating the environment fails because `venv` or `ensurepip` is unavailable,
+install your system's Python virtual-environment support first (the
+`python3-venv` package on Debian/Ubuntu).
 
 ## Outputs
 
 The output directory contains `vocabulary.json`, `outline.txt`, `storyboard.txt`,
-safe videos under `video_candidates/`, `audio.wav`, `transcript.json`,
-`subtitles.ass`, and `final.mp4`. `WorkflowResult` includes the selected video's
-path as well as the paths of the other main artifacts. Timestamps come directly
-from the speech-to-text provider; the workflow does not invent subtitle timing.
+safe candidates under `video_candidates/`, `audio.wav`, `transcript.json`,
+`subtitles.ass`, and `final.mp4`. Each retained candidate has sibling
+`candidate-N-attempt-N.mp4`, `.wav`, and `.json` files. The winning candidate's
+WAV and JSON are copied to the top-level `audio.wav` and `transcript.json`;
+selection does not run speech-to-text again. Other safe candidates and their
+sidecars remain available for inspection. `WorkflowResult` includes the selected
+video's path as well as the paths of the other main artifacts. Subtitle text and
+timing come from the same validated segments that passed audio safety.
 
 ## Tests
 

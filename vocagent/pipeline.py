@@ -1,15 +1,24 @@
-"""Run the eight steps described in workflow.md."""
+"""Generate candidates, check visual and spoken safety, then subtitle the winner."""
 
 import json
-from dataclasses import asdict
+import shutil
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Sequence
 
 from .media import FFmpegMedia
-from .models import SafetyResult, WorkflowResult
+from .models import SafetyResult, TranscriptSegment, WorkflowResult
 from .providers import Providers
-from .selection import select_candidate
+from .selection import select_candidate, validate_safety_result
 from .subtitles import validate_segments, write_ass
+
+
+@dataclass(frozen=True)
+class _VideoCandidate:
+    video: Path
+    audio: Path
+    transcript: Path
+    segments: tuple[TranscriptSegment, ...]
 
 
 class Workflow:
@@ -92,46 +101,62 @@ class Workflow:
         candidates_dir = output / "video_candidates"
         candidates_dir.mkdir()
 
-        def generate_video(slot: int, attempt: int, feedback: str | None) -> Path:
+        def generate_video(slot: int, attempt: int, feedback: str | None) -> _VideoCandidate:
             path = candidates_dir / f"candidate-{slot}-attempt-{attempt}.mp4"
             providers.video.generate(storyboard, path)
             if not path.is_file() or path.stat().st_size == 0:
                 raise ValueError(f"Video generator did not write a nonempty video: {path}")
-            return path
+            audio = path.with_suffix(".wav")
+            self.media.extract_audio(path, audio)
+            segments = tuple(providers.speech_to_text.transcribe(audio))
+            validate_segments(segments)
+            transcript = path.with_suffix(".json")
+            transcript.write_text(
+                json.dumps([asdict(segment) for segment in segments], ensure_ascii=False,
+                           indent=2, allow_nan=False) + "\n",
+                encoding="utf-8",
+            )
+            return _VideoCandidate(path, audio, transcript, segments)
 
-        def check_video(path: Path) -> SafetyResult:
-            assessment = providers.video_safety.check(path)
-            if isinstance(assessment, SafetyResult) and assessment.safe is False:
-                path.unlink()
-            return assessment
+        def check_video(candidate: _VideoCandidate) -> SafetyResult:
+            visual = validate_safety_result(
+                providers.video_safety.check(candidate.video), "video visuals"
+            )
+            audio = validate_safety_result(
+                providers.audio_safety.check("\n".join(
+                    segment.text for segment in candidate.segments
+                )),
+                "video audio",
+            )
+            if not visual.safe or not audio.safe:
+                for path in (candidate.video, candidate.audio, candidate.transcript):
+                    path.unlink()
+                return visual if not visual.safe else audio
+            return SafetyResult(True)
 
-        selected_video = select_candidate(
+        selected = select_candidate(
             stage="video",
             candidate_count=self.video_candidate_count,
             generate=generate_video,
             check_safety=check_video,
-            choose_best=lambda candidates: providers.video_quality.choose(storyboard, candidates),
+            choose_best=lambda candidates: providers.video_quality.choose(
+                storyboard, tuple(candidate.video for candidate in candidates)
+            ),
             pass_feedback=False,
             concurrent_candidates=self.concurrent_candidates,
         )
 
         audio_path = output / "audio.wav"
-        self.media.extract_audio(selected_video, audio_path)
-        segments = list(providers.speech_to_text.transcribe(audio_path))
-        validate_segments(segments)
         transcript_path = output / "transcript.json"
-        transcript_path.write_text(
-            json.dumps([asdict(segment) for segment in segments], ensure_ascii=False,
-                       indent=2, allow_nan=False) + "\n",
-            encoding="utf-8",
-        )
-        subtitles_path = write_ass(segments, output / "subtitles.ass")
+        shutil.copyfile(selected.audio, audio_path)
+        shutil.copyfile(selected.transcript, transcript_path)
+        subtitles_path = write_ass(selected.segments, output / "subtitles.ass")
         final_path = output / "final.mp4"
-        self.media.burn_subtitles(selected_video, subtitles_path, final_path)
+        self.media.burn_subtitles(selected.video, subtitles_path, final_path)
         return WorkflowResult(
             outline=outline_path,
             storyboard=storyboard_path,
-            selected_video=selected_video,
+            selected_video=selected.video,
             audio=audio_path,
             transcript=transcript_path,
             subtitles=subtitles_path,
