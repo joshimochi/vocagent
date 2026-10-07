@@ -5,8 +5,9 @@ The default provider factory is `vocagent.local:create_providers`, intended to r
 entirely on `hs`, using physical GPUs **4–7** (four MTT S4000, 48 GiB each).
 
 Model prompts live in [`vocagent/prompts/`](vocagent/prompts/), grouped into
-generation, safety, quality selection, and diagnostics modules. Edit the prompt
-text and duration-specific builders there.
+generation, safety, and quality selection modules. Edit the prompt text and
+duration-specific builders there. The opt-in diagnostic prompt lives in
+[`vocagent/diagnostics.py`](vocagent/diagnostics.py).
 
 | Task | Local checkpoint |
 | --- | --- |

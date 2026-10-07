@@ -8,9 +8,9 @@ import logging
 from pathlib import Path
 import time
 
+from .diagnostics import ARITHMETIC_PROMPT
 from .gpu_runtime import GPURuntime
 from .local_chat import LocalChatClient
-from .prompts.diagnostics import ARITHMETIC_PROMPT
 from .qwen import QwenQuality, QwenVideoQuality
 
 
