@@ -3,10 +3,10 @@
    word as English without a dictionary lookup.
 2. Generate, safety-check, and select an English story outline focused on one
    clear meaning of the target word.
-3. Generate, safety-check, and select an English storyboard that keeps that
+3. Generate, safety-check, and select an English video prompt that keeps that
    meaning and uses English dialogue containing the target word.
 4. For each video candidate attempt:
-   - Generate a video from the selected storyboard.
+   - Generate a video from the selected video prompt.
    - Extract audio with FFmpeg and transcribe it in English into timestamped segments.
    - Validate the segments and save the audio and transcript beside the video.
    - Check visuals with `VideoSafetyModel` and spoken content with a separate
@@ -22,18 +22,23 @@ selection, and sampled-frame video selection; Qwen3Guard-Gen-8B for text and
 complete recognized-transcript safety; MiniMax H3 for native audio/video;
 Qwen3-ASR-1.7B plus ForcedAligner-0.6B for timestamped speech; and ShieldGemma2
 4B for sampled-frame visual safety. The CLI and Python API default to the full
-video workflow. `--stop-after storyboard` or `stop_after="storyboard"` stops after
+video workflow. `--stop-after video-prompt` or `stop_after="video_prompt"` stops after
 selected text artifacts. Provider factories supply every workflow stage.
 The CLI takes one positional word, for example `curious`. The Python API accepts
 `Workflow(providers).run("curious", "output")` or the singleton sequence
 `["curious"]` as its input.
 
-Local storyboards use a plain storyboard prompt describing scene durations,
-visuals, dialogue and audio cues, with a speaking budget based on clip duration.
-The prompts require cartoon animation and an explicit cartoon style in the
-storyboard. Language and clip duration are specified in system prompts.
-Each generation makes one Qwen request; its response goes directly to the
-separate Guard check and selection before video generation.
+Local video prompt generation includes the full bundled
+[`h3_prompt_guide.md`](vocagent/prompts/h3_prompt_guide.md) in the system prompt,
+followed by task-specific instructions for cartoon animation, child-safe English
+dialogue and one clear meaning of the target word. The configured duration sets
+the timeline and speaking budget. The guide covers only T2VA; its three core
+fields are `integrated_multimodal_description`,
+`overall_soundscape` and `non_diegetic_music`. Visual action and English speech
+appear along the `[Shot N]` timeline; dialogue uses `<d>[English]...` tags.
+The video prompt explicitly states the cartoon style. Each generation makes one
+Qwen request; its response goes through the separate Guard check and selection,
+then the selected text is passed unchanged to H3.
 
 The local runtime serializes GPU inference and evicts the previous model family
 before loading its replacement. It rejects CPU/disk offloading. H3 runs in a
@@ -44,13 +49,13 @@ Model/runtime checks passed on hs; final content validation is in
 progress, and the single-word changes still need hs validation. See
 deploy/README.md for the deployment status.
 
-For the outline, storyboard, and video stages, fill the configured number of
+For the outline, video prompt, and video stages, fill the configured number of
 candidate slots with generation/safety attempts, then let a separate quality
 judge choose from the safe candidates in slot order when multiple candidates
 survive. If only one candidate survives, use it directly without a selection call.
 
 Configure the stages independently with `outline_candidate_count`,
-`storyboard_candidate_count`, and `video_candidate_count`. Each must be a positive
+`video_prompt_candidate_count`, and `video_candidate_count`. Each must be a positive
 integer and defaults to 2. The local video judge permits at most two slots
 (16 frames each, 32 total) within its verified context budget; this is checked
 before generation. Candidate slots run sequentially by default. Optional
@@ -61,19 +66,19 @@ instance when concurrency is enabled. In Python,
 pass these counts as keyword arguments to `Workflow` and set
 `concurrent_candidates=True` to enable concurrency.
 The CLI exposes them as `--outline-candidate-count`,
-`--storyboard-candidate-count`, and `--video-candidate-count`, plus
+`--video-prompt-candidate-count`, and `--video-candidate-count`, plus
 `--concurrent-candidates` to enable concurrency.
 
 For LLM-generated texts, a separate safety agent checks the result. An unsafe
 result's failure reason is passed to the next generation attempt in the same
 slot. A separate quality agent chooses the best safe result.
 
-Save each accepted outline and storyboard as UTF-8 text before quality selection
-in `outline_candidates/` and `storyboard_candidates/`, respectively. Files are named
+Save each accepted outline and video prompt as UTF-8 text before quality selection
+in `outline_candidates/` and `video_prompt_candidates/`, respectively. Files are named
 `candidate-N-attempt-M.txt`, using one-based slot and attempt numbers. Retain all
 accepted alternatives, and write the selected texts to `outline.txt` and
-`storyboard.txt`. These candidate files are also kept when stopping after the
-storyboard or when a later provider or quality-selection call fails.
+`video_prompt.txt`. These candidate files are also kept when stopping after the
+video prompt or when a later provider or quality-selection call fails.
 
 Each video attempt writes sibling `candidate-N-attempt-N.mp4`, `.wav`, and `.json`
 files under `video_candidates/`. Both safety checks run after successful

@@ -26,9 +26,9 @@ class IsolatedMiniMaxH3VideoGenerator(MiniMaxH3VideoGenerator):
         self.python_executable = str(python_executable)
         self.timeout = timeout
 
-    def generate(self, storyboard, output_path):
-        if not isinstance(storyboard, str) or not storyboard.strip():
-            raise ValueError("H3 requires a nonempty storyboard.")
+    def generate(self, video_prompt, output_path):
+        if not isinstance(video_prompt, str) or not video_prompt.strip():
+            raise ValueError("H3 requires a nonempty video prompt.")
         output_path = Path(output_path).resolve()
         output_path.parent.mkdir(parents=True, exist_ok=True)
         # The sentinel owns no weights. Entering evicts the previous family;
@@ -40,7 +40,7 @@ class IsolatedMiniMaxH3VideoGenerator(MiniMaxH3VideoGenerator):
                 payload = {
                     "backend": self.runtime.backend,
                     "model": str(self.model_path.resolve()),
-                    "storyboard": storyboard,
+                    "video_prompt": video_prompt,
                     "settings": asdict(self.settings),
                     "output": str(candidate),
                 }

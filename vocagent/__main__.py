@@ -6,7 +6,7 @@ import logging
 import sys
 from pathlib import Path
 
-from .models import StoryboardResult
+from .models import VideoPromptResult
 from .pipeline import Workflow
 from .providers import Providers
 from .selection import HumanInterventionRequired
@@ -46,7 +46,7 @@ def load_providers(spec: str) -> Providers:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        prog="vocagent", description="Generate a storyboard or subtitled video teaching one English word.",
+        prog="vocagent", description="Generate a video prompt or subtitled video teaching one English word.",
     )
     parser.add_argument("word", type=english_word, help="One English word to teach")
     parser.add_argument("--output-dir", type=Path, default=Path("output"),
@@ -54,12 +54,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--providers", metavar="MODULE:FACTORY",
                         default=DEFAULT_PROVIDER_FACTORY,
                         help="Provider factory (default: vocagent.local:create_providers)")
-    parser.add_argument("--stop-after", choices=("storyboard", "video"), default="video",
+    parser.add_argument("--stop-after", choices=("video-prompt", "video"), default="video",
                         help="Last stage to run (default: video)")
     parser.add_argument("--outline-candidate-count", type=positive_integer, default=2,
                         help="Number of outline candidate slots (default: 2)")
-    parser.add_argument("--storyboard-candidate-count", type=positive_integer, default=2,
-                        help="Number of storyboard candidate slots (default: 2)")
+    parser.add_argument("--video-prompt-candidate-count", type=positive_integer, default=2,
+                        help="Number of video prompt candidate slots (default: 2)")
     parser.add_argument("--video-candidate-count", type=positive_integer, default=2,
                         help="Number of video candidate slots (default: 2)")
     parser.add_argument("--concurrent-candidates", action="store_true",
@@ -72,10 +72,10 @@ def main(argv: list[str] | None = None) -> int:
         result = Workflow(
             providers,
             outline_candidate_count=args.outline_candidate_count,
-            storyboard_candidate_count=args.storyboard_candidate_count,
+            video_prompt_candidate_count=args.video_prompt_candidate_count,
             video_candidate_count=args.video_candidate_count,
             concurrent_candidates=args.concurrent_candidates,
-        ).run(args.word, args.output_dir, stop_after=args.stop_after)
+        ).run(args.word, args.output_dir, stop_after=args.stop_after.replace("-", "_"))
     except HumanInterventionRequired as exc:
         print(f"Human intervention required: {exc}", file=sys.stderr)
         return 2
@@ -86,7 +86,7 @@ def main(argv: list[str] | None = None) -> int:
     finally:
         if providers is not None:
             providers.close()
-    print(result.storyboard if isinstance(result, StoryboardResult) else result.final_video)
+    print(result.video_prompt if isinstance(result, VideoPromptResult) else result.final_video)
     return 0
 
 

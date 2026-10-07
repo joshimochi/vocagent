@@ -10,7 +10,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 from vocagent.__main__ import load_providers, main
-from vocagent.models import SafetyResult, StoryboardResult
+from vocagent.models import SafetyResult, VideoPromptResult
 from vocagent.providers import (
     AudioSafetyModel, LLMGenerator, Providers, SpeechToText, TextQualityAgent,
     TextSafetyAgent, VideoGenerator, VideoQualityModel, VideoSafetyModel,
@@ -56,21 +56,21 @@ class CLITests(unittest.TestCase):
         with patch("vocagent.__main__.load_providers",
                    side_effect=ValueError("Configure the local model checkpoints")) as load, \
                 redirect_stderr(stderr), redirect_stdout(stdout):
-            status = main(["apple", "--stop-after", "storyboard"])
+            status = main(["apple", "--stop-after", "video-prompt"])
 
         load.assert_called_once_with("vocagent.local:create_providers")
         self.assertEqual(status, 1)
         self.assertIn("Workflow stopped: Configure the local model checkpoints", stderr.getvalue())
         self.assertEqual(stdout.getvalue(), "")
 
-    def test_local_factory_explicit_stop_at_storyboard(self):
+    def test_local_factory_explicit_stop_at_video_prompt(self):
         llm = Mock(spec=LLMGenerator)
         llm.generate_outline.return_value = "A story about an apple."
-        storyboard = (
+        video_prompt = (
             'Scene 1 (0–10 seconds): A friend catches an apple and says "Apple!"\n'
             "Audio: Leaves rustle."
         )
-        llm.generate_storyboard.return_value = storyboard
+        llm.generate_video_prompt.return_value = video_prompt
         safety = Mock(spec=TextSafetyAgent)
         safety.check.return_value = SafetyResult(True)
         quality = Mock()
@@ -80,22 +80,22 @@ class CLITests(unittest.TestCase):
             stdout = io.StringIO()
             with patch("vocagent.__main__.load_providers", return_value=providers) as load, \
                     redirect_stdout(stdout):
-                status = main(["apple", "--output-dir", temporary, "--stop-after", "storyboard"])
+                status = main(["apple", "--output-dir", temporary, "--stop-after", "video-prompt"])
 
             self.assertEqual(status, 0)
             load.assert_called_once_with("vocagent.local:create_providers")
             output = Path(temporary)
-            self.assertEqual(stdout.getvalue(), f"{output / 'storyboard.txt'}\n")
-            self.assertEqual((output / "storyboard.txt").read_text(), storyboard)
+            self.assertEqual(stdout.getvalue(), f"{output / 'video_prompt.txt'}\n")
+            self.assertEqual((output / "video_prompt.txt").read_text(), video_prompt)
             self.assertEqual({path.name for path in output.iterdir()}, {
-                "vocabulary.json", "outline.txt", "storyboard.txt",
-                "outline_candidates", "storyboard_candidates", "benchmark.json",
+                "vocabulary.json", "outline.txt", "video_prompt.txt",
+                "outline_candidates", "video_prompt_candidates", "benchmark.json",
             })
             report = json.loads((output / "benchmark.json").read_text(encoding="utf-8"))
             self.assertEqual(report["status"], "completed")
-            self.assertEqual(report["metadata"]["stop_after"], "storyboard")
+            self.assertEqual(report["metadata"]["stop_after"], "video_prompt")
             for stage, text in (("outline", "A story about an apple."),
-                                ("storyboard", storyboard)):
+                                ("video_prompt", video_prompt)):
                 self.assertEqual({
                     path.name: path.read_text(encoding="utf-8")
                     for path in (output / f"{stage}_candidates").iterdir()
@@ -134,16 +134,16 @@ class CLITests(unittest.TestCase):
 
     def test_explicit_stop_stage_applies_to_each_provider(self):
         for factory_args in ([], ["--providers", "example:build"]):
-            for stage in ("storyboard", "video"):
+            for stage in ("video_prompt", "video"):
                 with self.subTest(factory_args=factory_args, stage=stage), \
                         patch("vocagent.__main__.load_providers", return_value=providers_for_test()), \
                         patch("vocagent.__main__.Workflow") as workflow, \
                         redirect_stdout(io.StringIO()):
                     workflow.return_value.run.return_value = (
-                        StoryboardResult(Path("outline.txt"), Path("storyboard.txt"))
-                        if stage == "storyboard" else SimpleNamespace(final_video=Path("final.mp4"))
+                        VideoPromptResult(Path("outline.txt"), Path("video_prompt.txt"))
+                        if stage == "video_prompt" else SimpleNamespace(final_video=Path("final.mp4"))
                     )
-                    status = main(["apple", *factory_args, "--stop-after", stage])
+                    status = main(["apple", *factory_args, "--stop-after", stage.replace("_", "-")])
 
                 self.assertEqual(status, 0)
                 workflow.return_value.run.assert_called_once_with(
@@ -184,7 +184,7 @@ class CLITests(unittest.TestCase):
         self.assertEqual(status, 0)
         load.assert_called_once_with("example:build")
         workflow.assert_called_once_with(
-            providers, outline_candidate_count=2, storyboard_candidate_count=2,
+            providers, outline_candidate_count=2, video_prompt_candidate_count=2,
             video_candidate_count=2, concurrent_candidates=False,
         )
         workflow.return_value.run.assert_called_once_with(
@@ -206,18 +206,18 @@ class CLITests(unittest.TestCase):
                         "apple", "--providers", "example:build",
                         *(["--concurrent-candidates"] if concurrent_candidates else []),
                         "--outline-candidate-count", "1",
-                        "--storyboard-candidate-count", "3",
+                        "--video-prompt-candidate-count", "3",
                         "--video-candidate-count", "6",
                     ])
 
                 self.assertEqual(status, 0)
                 workflow.assert_called_once_with(
-                    providers, outline_candidate_count=1, storyboard_candidate_count=3,
+                    providers, outline_candidate_count=1, video_prompt_candidate_count=3,
                     video_candidate_count=6, concurrent_candidates=concurrent_candidates,
                 )
 
     def test_invalid_candidate_counts_stop_before_providers_or_output(self):
-        for stage in ("outline", "storyboard", "video"):
+        for stage in ("outline", "video-prompt", "video"):
             flag = f"--{stage}-candidate-count"
             for value in ("0", "-1", "1.5", "invalid"):
                 with self.subTest(stage=stage, value=value), \
@@ -252,7 +252,7 @@ class CLITests(unittest.TestCase):
 
         self.assertEqual(status, 0)
         workflow.assert_called_once_with(
-            providers, outline_candidate_count=2, storyboard_candidate_count=2,
+            providers, outline_candidate_count=2, video_prompt_candidate_count=2,
             video_candidate_count=2, concurrent_candidates=True,
         )
 

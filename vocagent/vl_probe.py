@@ -92,7 +92,7 @@ def main(argv=None):
                         help="Existing real video; sampled twice to exercise two candidate groups")
     parser.add_argument("--second-video", type=Path,
                         help="Optional distinct candidate; defaults to the first video")
-    parser.add_argument("--storyboard", default="A curious traveler safely crosses a bridge.")
+    parser.add_argument("--video-prompt", default="A curious traveler safely crosses a bridge.")
     parser.add_argument("--report", type=Path, required=True)
     parser.add_argument("--backend", choices=("musa", "cuda"), default="musa")
     parser.add_argument("--max-frames", type=int, default=4,
@@ -146,7 +146,7 @@ def main(argv=None):
                 "A person eats lunch alone. Nothing else happens.",
             ))),
         ("video_selection", None, lambda: QwenVideoQuality(client, max_frames=args.max_frames).choose(
-            args.storyboard, videos)),
+            args.video_prompt, videos)),
     ]
     try:
         for name, expected, run in cases:

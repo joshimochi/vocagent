@@ -10,10 +10,14 @@ Model prompts live in [`vocagent/prompts/`](vocagent/prompts/), grouped into
 generation, safety, and quality selection modules. Edit the prompt text and
 duration-specific builders there. The opt-in diagnostic prompt lives in
 [`vocagent/diagnostics.py`](vocagent/diagnostics.py).
+Video prompt generation includes the full bundled
+[`h3_prompt_guide.md`](vocagent/prompts/h3_prompt_guide.md) in its system prompt,
+followed by the vocabulary-learning instructions and configured duration and
+speaking budget. The guide covers only text-to-video-with-audio (T2VA).
 
 | Task | Local checkpoint |
 | --- | --- |
-| Outline, storyboard, text selection, visual video selection | Qwen/Qwen3-VL-32B-Instruct, BF16 |
+| Outline, video prompt, text selection, visual video selection | Qwen/Qwen3-VL-32B-Instruct, BF16 |
 | Text and complete transcript safety | Qwen/Qwen3Guard-Gen-8B, BF16 |
 | Video with native audio | MiniMaxAI/MiniMax-H3, full released weights |
 | Speech recognition | Qwen/Qwen3-ASR-1.7B, BF16 |
@@ -41,18 +45,18 @@ Each run accepts exactly one English target word. Multiple words and phrases are
 The input permits ASCII letters with internal apostrophes or hyphens, such as
 `don't` or `well-known`; it is treated as English without a dictionary lookup.
 Generation and selection prompts require cartoon animation, English text and
-spoken dialogue, with the outline, storyboard, and video focused on one clear
-meaning of the target word. The storyboard explicitly states the cartoon style.
+spoken dialogue, with the outline, video prompt, and video focused on one clear
+meaning of the target word. The video prompt explicitly states the cartoon style.
 Language and clip duration are specified in system prompts. Speech recognition
 also defaults to English.
 
-The CLI defaults to a complete subtitled video. `--stop-after storyboard`
+The CLI defaults to a complete subtitled video. `--stop-after video-prompt`
 stops after the selected text artifacts. The output directory must be new or
 empty. Candidate counts default to two per stage:
 
 ```sh
 bash deploy/run_hs.sh curious \
-  --outline-candidate-count 2 --storyboard-candidate-count 2 \
+  --outline-candidate-count 2 --video-prompt-candidate-count 2 \
   --video-candidate-count 2 --output-dir /data/group6/vocagent/outputs/example-2
 ```
 
@@ -71,6 +75,16 @@ finally:
 ```
 
 The Python API also accepts a singleton sequence such as `["curious"]`.
+Use `stop_after="video_prompt"` to return the selected text artifacts as a
+`VideoPromptResult`.
+
+The former `storyboard` stage is now `video_prompt`: update Python provider
+methods to `generate_video_prompt`, configuration to `video_prompt_seconds` and
+`video_prompt_candidate_count`, and result fields to `video_prompt`. CLI flags
+use hyphens: `--stop-after video-prompt` and `--video-prompt-candidate-count`.
+Selected text and candidate files now use `video_prompt.txt` and
+`video_prompt_candidates/`; benchmark steps use `video_prompt.*`. Old names have
+no compatibility aliases; existing output files are not renamed.
 
 ## Memory and model choice
 
@@ -100,9 +114,9 @@ threads can preprocess in parallel, but model inference remains serialized.
 ## Workflow and safety behavior
 
 1. Generate outlines; check each with Qwen3Guard; select the best safe outline.
-2. Generate storyboards with scene durations, visuals, dialogue and audio cues,
-   using a speaking budget matched to the clip duration. Check each with Guard
-   and select the best safe storyboard.
+2. Generate video prompts using the H3 guide's three core fields, shot sequence,
+   visuals, dialogue and audio cues, with a speaking budget matched to the clip
+   duration. Check each with Guard and select the best safe video prompt.
 3. Generate a video with native audio. Extract mono 16 kHz PCM audio with FFmpeg.
 4. Run Qwen3-ASR in English plus forced alignment. Preserve the recognized text and its
    aligned timestamps in the saved transcript and subtitle cues.
@@ -155,8 +169,8 @@ All model paths are local directories. `VOCAGENT_DEPLOY_ROOT` defaults to
 
 H3 output is fixed in landscape at a width of 1344, a height of 768, and a requested duration
 of 15 seconds. Duration is rounded to its native video-frame grid within the
-15-second limit (345 frames at 24 fps, or 14.375 seconds). Outline and storyboard
-prompts use the same 15-second budget. These settings are hardcoded.
+15-second limit (345 frames at 24 fps, or 14.375 seconds). Outline generation and
+video prompt generation use the same 15-second budget. These settings are hardcoded.
 The earlier 1344×768, 10-second shape passed a full GPU capacity check. Native-resolution
 generation is slow on S4000: allow roughly 2.5 hours for a 10-second, 50-point
 render based on the measured single iteration; the default worker limit is four
@@ -169,18 +183,18 @@ keys, or SSH tunnels.
 
 ## Outputs and tests
 
-Outputs include `vocabulary.json`, the selected `outline.txt` and `storyboard.txt`,
-all accepted text candidates in `outline_candidates/` and `storyboard_candidates/`,
+Outputs include `vocabulary.json`, the selected `outline.txt` and `video_prompt.txt`,
+all accepted text candidates in `outline_candidates/` and `video_prompt_candidates/`,
 safe video candidates and sidecars in `video_candidates/`, the selected
 `audio.wav` and `transcript.json`, `subtitles.ass`, `final.mp4`, and `benchmark.json`.
 Text candidates are UTF-8 files named `candidate-N-attempt-M.txt`, with one-based
 candidate slot and attempt numbers. They are saved after passing safety and before
 quality selection, including accepted alternatives that were not selected.
-`--stop-after storyboard` also retains both text candidate directories. Earlier
+`--stop-after video-prompt` also retains both text candidate directories. Earlier
 artifacts, including accepted text candidates, remain available after a provider
 or quality-selection failure.
 
-Every started workflow writes `benchmark.json`, including storyboard-only runs
+Every started workflow writes `benchmark.json`, including runs stopped after video prompt generation
 and failed runs. `result.benchmarks` points to the report. It records each
 generation, safety check, selection, audio extraction, and
 subtitle operation, with candidate slot and attempt numbers for retries. The

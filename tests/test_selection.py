@@ -45,7 +45,7 @@ class SelectionTests(unittest.TestCase):
 
         judge = Mock(return_value=0)
         result = select_candidate(
-            stage="storyboard", generate=generate, check_safety=check,
+            stage="video_prompt", generate=generate, check_safety=check,
             choose_best=judge, pass_feedback=True,
         )
 
@@ -308,9 +308,9 @@ class SelectionTests(unittest.TestCase):
                 check = Mock(return_value=safety)
                 judge = Mock()
 
-                with self.assertRaisesRegex(ValueError, "storyboard.*SafetyResult"):
+                with self.assertRaisesRegex(ValueError, "video_prompt.*SafetyResult"):
                     select_candidate(
-                        stage="storyboard", generate=generate, check_safety=check,
+                        stage="video_prompt", generate=generate, check_safety=check,
                         choose_best=judge, pass_feedback=True,
                     )
 

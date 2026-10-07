@@ -14,3 +14,6 @@ vocagent = "vocagent.__main__:main"
 
 [tool.setuptools.packages.find]
 include = ["vocagent*"]
+
+[tool.setuptools.package-data]
+"vocagent.prompts" = ["h3_prompt_guide.md"]

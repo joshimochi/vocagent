@@ -27,7 +27,7 @@ def main(argv=None):
             generator = MiniMaxH3VideoGenerator(
                 runtime, request["model"], H3Settings(**request["settings"]),
             )
-            generator.generate(request["storyboard"], Path(request["output"]))
+            generator.generate(request["video_prompt"], Path(request["output"]))
     except BaseException as exc:
         error = exc
         raise

@@ -44,7 +44,7 @@ class LocalFactoryTests(unittest.TestCase):
             self.assertEqual(providers.video.settings.seconds, 15)
             self.assertEqual(providers.video.settings.profile, "quality")
             self.assertEqual(providers.video.settings.steps, 50)
-            self.assertEqual(providers.llm.storyboard_seconds, providers.video.settings.seconds)
+            self.assertEqual(providers.llm.video_prompt_seconds, providers.video.settings.seconds)
             providers.video_quality.validate_candidate_count(2)
             with self.assertRaisesRegex(ValueError, 'at most 2 candidate slots'):
                 providers.video_quality.validate_candidate_count(3)
@@ -65,7 +65,7 @@ class LocalFactoryTests(unittest.TestCase):
                     self.assertEqual((providers.video.settings.width, providers.video.settings.height), (960, 544))
                     self.assertEqual(providers.video.settings.steps, expected_steps)
                     self.assertEqual(providers.video.settings.num_frames, 345)
-                    self.assertEqual(providers.llm.storyboard_seconds, providers.video.settings.seconds)
+                    self.assertEqual(providers.llm.video_prompt_seconds, providers.video.settings.seconds)
                     self.assertIsNone(providers.runtime._torch)
             with self.assertRaisesRegex(ValueError, 'profile'):
                 create_providers({**env, 'MINIMAX_H3_PROFILE': 'fast'})

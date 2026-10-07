@@ -507,9 +507,9 @@ class MiniMaxH3VideoGenerator(VideoGenerator):
                 MiniMaxH3PrepareLayoutStep.build_packed_sequence = staticmethod(fp32_layout)
         return pipe
 
-    def generate(self, storyboard: str, output_path: Path) -> None:
-        if not isinstance(storyboard, str) or not storyboard.strip():
-            raise ValueError("H3 requires a nonempty storyboard.")
+    def generate(self, video_prompt: str, output_path: Path) -> None:
+        if not isinstance(video_prompt, str) or not video_prompt.strip():
+            raise ValueError("H3 requires a nonempty video prompt.")
         output_path = Path(output_path)
         output_path.parent.mkdir(parents=True, exist_ok=True)
         with self.runtime.use(("minimax-h3", str(self.model_path.resolve())), self._load) as pipe:
@@ -517,7 +517,7 @@ class MiniMaxH3VideoGenerator(VideoGenerator):
             with model_phase("run", self.runtime, model=str(self.model_path)) as phase:
                 with torch.inference_mode():
                     result = pipe(
-                        prompt=storyboard, width=self.settings.width, height=self.settings.height,
+                        prompt=video_prompt, width=self.settings.width, height=self.settings.height,
                         num_frames=self.settings.num_frames, num_inference_steps=self.settings.steps,
                         generator=torch.Generator(device="cpu").manual_seed(secrets.randbits(32)),
                         output=["videos", "audio", "sampling_rate"],

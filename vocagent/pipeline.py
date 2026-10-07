@@ -10,7 +10,7 @@ from typing import Literal, Sequence
 
 from .benchmark import Benchmark
 from .media import FFmpegMedia
-from .models import SafetyResult, StoryboardResult, TranscriptSegment, WorkflowResult
+from .models import SafetyResult, VideoPromptResult, TranscriptSegment, WorkflowResult
 from .providers import Providers
 from .selection import select_candidate, validate_safety_result, validate_selection_index
 from .subtitles import validate_segments, write_ass
@@ -36,13 +36,13 @@ class Workflow:
         media: FFmpegMedia | None = None,
         *,
         outline_candidate_count: int = 2,
-        storyboard_candidate_count: int = 2,
+        video_prompt_candidate_count: int = 2,
         video_candidate_count: int = 2,
         concurrent_candidates: bool = False,
     ):
         for name, count in (
             ("outline_candidate_count", outline_candidate_count),
-            ("storyboard_candidate_count", storyboard_candidate_count),
+            ("video_prompt_candidate_count", video_prompt_candidate_count),
             ("video_candidate_count", video_candidate_count),
         ):
             if type(count) is not int or count < 1:
@@ -50,7 +50,7 @@ class Workflow:
         self.providers = providers
         self.media = media
         self.outline_candidate_count = outline_candidate_count
-        self.storyboard_candidate_count = storyboard_candidate_count
+        self.video_prompt_candidate_count = video_prompt_candidate_count
         self.video_candidate_count = video_candidate_count
         self.concurrent_candidates = concurrent_candidates
 
@@ -59,11 +59,11 @@ class Workflow:
         vocabulary: str | Sequence[str],
         output_dir: str | Path,
         *,
-        stop_after: Literal["storyboard", "video"] = "video",
-    ) -> StoryboardResult | WorkflowResult:
+        stop_after: Literal["video_prompt", "video"] = "video",
+    ) -> VideoPromptResult | WorkflowResult:
         """Teach one English word, optionally continuing through final video."""
-        if stop_after not in ("storyboard", "video"):
-            raise ValueError("stop_after must be 'storyboard' or 'video'.")
+        if stop_after not in ("video_prompt", "video"):
+            raise ValueError("stop_after must be 'video_prompt' or 'video'.")
         words = (normalize_target_word(vocabulary),)
         if stop_after == "video":
             self.providers.video_quality.validate_candidate_count(self.video_candidate_count)
@@ -75,7 +75,7 @@ class Workflow:
             "stop_after": stop_after,
             "vocabulary_count": len(words),
             "outline_candidate_count": self.outline_candidate_count,
-            "storyboard_candidate_count": self.storyboard_candidate_count,
+            "video_prompt_candidate_count": self.video_prompt_candidate_count,
             "video_candidate_count": self.video_candidate_count,
             "concurrent_candidates": self.concurrent_candidates,
         })
@@ -97,9 +97,9 @@ class Workflow:
         self,
         words: tuple[str, ...],
         output: Path,
-        stop_after: Literal["storyboard", "video"],
+        stop_after: Literal["video_prompt", "video"],
         benchmark: Benchmark,
-    ) -> StoryboardResult | WorkflowResult:
+    ) -> VideoPromptResult | WorkflowResult:
         (output / "vocabulary.json").write_text(
             json.dumps(words, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
         )
@@ -152,31 +152,31 @@ class Workflow:
         outline_path = output / "outline.txt"
         outline_path.write_text(outline, encoding="utf-8")
 
-        storyboard_candidates_dir = output / "storyboard_candidates"
-        storyboard_candidates_dir.mkdir()
+        video_prompt_candidates_dir = output / "video_prompt_candidates"
+        video_prompt_candidates_dir.mkdir()
 
-        def generate_storyboard(slot: int, attempt: int, feedback: str | None) -> str:
+        def generate_video_prompt(slot: int, attempt: int, feedback: str | None) -> str:
             candidate_metadata.set({"slot": slot, "attempt": attempt})
-            with benchmark.step("storyboard.generation", **candidate_metadata.get()):
-                return checked_text(providers.llm.generate_storyboard(words, outline, feedback))
+            with benchmark.step("video_prompt.generation", **candidate_metadata.get()):
+                return checked_text(providers.llm.generate_video_prompt(words, outline, feedback))
 
-        storyboard = select_candidate(
-            stage="storyboard",
-            candidate_count=self.storyboard_candidate_count,
-            generate=generate_storyboard,
-            check_safety=lambda text: check_text("storyboard", text),
-            choose_best=lambda candidates: choose_text("storyboard", candidates),
+        video_prompt = select_candidate(
+            stage="video_prompt",
+            candidate_count=self.video_prompt_candidate_count,
+            generate=generate_video_prompt,
+            check_safety=lambda text: check_text("video_prompt", text),
+            choose_best=lambda candidates: choose_text("video_prompt", candidates),
             pass_feedback=True,
             concurrent_candidates=self.concurrent_candidates,
             on_accept=lambda slot, attempt, text: save_text_candidate(
-                storyboard_candidates_dir, slot, attempt, text
+                video_prompt_candidates_dir, slot, attempt, text
             ),
         )
-        storyboard_path = output / "storyboard.txt"
-        storyboard_path.write_text(storyboard, encoding="utf-8")
-        if stop_after == "storyboard":
-            return StoryboardResult(
-                outline=outline_path, storyboard=storyboard_path,
+        video_prompt_path = output / "video_prompt.txt"
+        video_prompt_path.write_text(video_prompt, encoding="utf-8")
+        if stop_after == "video_prompt":
+            return VideoPromptResult(
+                outline=outline_path, video_prompt=video_prompt_path,
                 benchmarks=output / "benchmark.json",
             )
 
@@ -188,7 +188,7 @@ class Workflow:
             candidate_metadata.set({"slot": slot, "attempt": attempt})
             path = candidates_dir / f"candidate-{slot}-attempt-{attempt}.mp4"
             with benchmark.step("video.generation", **candidate_metadata.get()):
-                providers.video.generate(storyboard, path)
+                providers.video.generate(video_prompt, path)
                 if not path.is_file() or path.stat().st_size == 0:
                     raise ValueError(f"Video generator did not write a nonempty video: {path}")
             audio = path.with_suffix(".wav")
@@ -236,7 +236,7 @@ class Workflow:
             with benchmark.step("video.selection", candidate_count=len(candidates)):
                 return validate_selection_index(
                     providers.video_quality.choose(
-                        storyboard, tuple(candidate.video for candidate in candidates)
+                        video_prompt, tuple(candidate.video for candidate in candidates)
                     ),
                     len(candidates), "video",
                 )
@@ -263,7 +263,7 @@ class Workflow:
             media.burn_subtitles(selected.video, subtitles_path, final_path)
         return WorkflowResult(
             outline=outline_path,
-            storyboard=storyboard_path,
+            video_prompt=video_prompt_path,
             selected_video=selected.video,
             audio=audio_path,
             transcript=transcript_path,

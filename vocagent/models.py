@@ -20,18 +20,18 @@ class TranscriptSegment:
 
 
 @dataclass(frozen=True)
-class StoryboardResult:
-    """Selected, safety-checked outline and storyboard artifacts."""
+class VideoPromptResult:
+    """Selected, safety-checked outline and video prompt artifacts."""
 
     outline: Path
-    storyboard: Path
+    video_prompt: Path
     benchmarks: Path | None = None
 
 
 @dataclass(frozen=True)
 class WorkflowResult:
     outline: Path
-    storyboard: Path
+    video_prompt: Path
     selected_video: Path
     audio: Path
     transcript: Path

@@ -8,7 +8,7 @@ import unittest
 from unittest.mock import Mock, call, patch
 
 from vocagent.media import FFmpegMedia
-from vocagent.models import SafetyResult, StoryboardResult, TranscriptSegment
+from vocagent.models import SafetyResult, VideoPromptResult, TranscriptSegment
 from vocagent.pipeline import Workflow
 from vocagent.providers import (
     AudioSafetyModel, LLMGenerator, Providers, SpeechToText, TextQualityAgent, TextSafetyAgent,
@@ -38,7 +38,7 @@ class PipelineTests(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.output = Path(self.temporary.name).resolve() / "result"
-        text_counts = {"outline": 0, "storyboard": 0}
+        text_counts = {"outline": 0, "video_prompt": 0}
         text_lock = Lock()
 
         def generate_text(stage):
@@ -50,8 +50,8 @@ class PipelineTests(unittest.TestCase):
         self.llm.generate_outline.side_effect = (
             lambda vocabulary, feedback: generate_text("outline")
         )
-        self.llm.generate_storyboard.side_effect = (
-            lambda vocabulary, outline, feedback: generate_text("storyboard")
+        self.llm.generate_video_prompt.side_effect = (
+            lambda vocabulary, outline, feedback: generate_text("video_prompt")
         )
         self.text_safety = Mock(spec=TextSafetyAgent)
         self.text_safety.check.return_value = SafetyResult(True)
@@ -61,7 +61,7 @@ class PipelineTests(unittest.TestCase):
         )
         self.video = Mock(spec=VideoGenerator)
         self.video.generate.side_effect = (
-            lambda storyboard, output_path: output_path.write_bytes(b"fake video")
+            lambda video_prompt, output_path: output_path.write_bytes(b"fake video")
         )
         self.video_safety = Mock(spec=VideoSafetyModel)
         self.video_safety.check.return_value = SafetyResult(True)
@@ -103,9 +103,9 @@ class PipelineTests(unittest.TestCase):
             "outline.generation": 2,
             "outline.safety": 2,
             "outline.selection": 1,
-            "storyboard.generation": 2,
-            "storyboard.safety": 2,
-            "storyboard.selection": 1,
+            "video_prompt.generation": 2,
+            "video_prompt.safety": 2,
+            "video_prompt.selection": 1,
             "video.generation": 2,
             "audio.extraction": 2,
             "speech.transcription": 2,
@@ -150,7 +150,7 @@ class PipelineTests(unittest.TestCase):
                 workflow = Workflow(
                     self.providers, self.media,
                     outline_candidate_count=1,
-                    storyboard_candidate_count=1,
+                    video_prompt_candidate_count=1,
                     video_candidate_count=1,
                     concurrent_candidates=concurrent_candidates,
                 )
@@ -159,7 +159,7 @@ class PipelineTests(unittest.TestCase):
 
                 self.text_quality.choose.assert_not_called()
                 self.video_quality.choose.assert_not_called()
-                for stage, path in (("outline", result.outline), ("storyboard", result.storyboard)):
+                for stage, path in (("outline", result.outline), ("video_prompt", result.video_prompt)):
                     candidate = output / f"{stage}_candidates" / "candidate-1-attempt-1.txt"
                     self.assertEqual(path.read_text(), candidate.read_text())
                 self.assertEqual(
@@ -170,7 +170,7 @@ class PipelineTests(unittest.TestCase):
                 report = json.loads(result.benchmarks.read_text(encoding="utf-8"))
                 self.assertEqual(report["status"], "completed")
                 steps = {step["name"]: step for step in report["steps"]}
-                for stage in ("outline", "storyboard", "video"):
+                for stage in ("outline", "video_prompt", "video"):
                     self.assertEqual(steps[f"{stage}.generation"]["calls"], 1)
                     self.assertEqual(steps[f"{stage}.safety"]["calls"], 1)
                     self.assertNotIn(f"{stage}.selection", steps)
@@ -183,18 +183,18 @@ class PipelineTests(unittest.TestCase):
         words = ("apple",)
         quality_calls = self.text_quality.choose.call_args_list
         self.assertEqual(len(quality_calls), 2)
-        outline_call, storyboard_call = quality_calls
+        outline_call, video_prompt_call = quality_calls
         self.assertEqual(outline_call.args[:2], ("outline", words))
-        self.assertEqual(storyboard_call.args[:2], ("storyboard", words))
+        self.assertEqual(video_prompt_call.args[:2], ("video_prompt", words))
         outlines = outline_call.args[2]
-        storyboards = storyboard_call.args[2]
+        video_prompts = video_prompt_call.args[2]
         self.assertCountEqual(outlines, [f"outline {number}" for number in range(1, 3)])
-        self.assertCountEqual(storyboards, [f"storyboard {number}" for number in range(1, 3)])
+        self.assertCountEqual(video_prompts, [f"video_prompt {number}" for number in range(1, 3)])
         chosen_outline = outlines[1]
-        chosen_storyboard = storyboards[0]
+        chosen_video_prompt = video_prompts[0]
         self.assertEqual(self.llm.generate_outline.call_args_list, [call(words, None)] * 2)
         self.assertEqual(
-            self.llm.generate_storyboard.call_args_list,
+            self.llm.generate_video_prompt.call_args_list,
             [call(words, chosen_outline, None)] * 2,
         )
         videos = tuple(
@@ -203,9 +203,9 @@ class PipelineTests(unittest.TestCase):
         )
         self.assertCountEqual(
             self.video.generate.call_args_list,
-            [call(chosen_storyboard, path) for path in videos],
+            [call(chosen_video_prompt, path) for path in videos],
         )
-        self.video_quality.choose.assert_called_once_with(chosen_storyboard, videos)
+        self.video_quality.choose.assert_called_once_with(chosen_video_prompt, videos)
         self.assertEqual(result.selected_video, videos[1])
         self.assertCountEqual(
             self.media.extract_audio.call_args_list,
@@ -224,8 +224,8 @@ class PipelineTests(unittest.TestCase):
             videos[1], result.subtitles, result.final_video,
         )
         self.assertEqual(result.outline.read_text(), chosen_outline)
-        self.assertEqual(result.storyboard.read_text(), chosen_storyboard)
-        for stage, candidates in (("outline", outlines), ("storyboard", storyboards)):
+        self.assertEqual(result.video_prompt.read_text(), chosen_video_prompt)
+        for stage, candidates in (("outline", outlines), ("video_prompt", video_prompts)):
             self.assertEqual({
                 path.name: path.read_text(encoding="utf-8")
                 for path in (self.output / f"{stage}_candidates").iterdir()
@@ -262,23 +262,23 @@ class PipelineTests(unittest.TestCase):
         )
         self.assertEqual(result.final_video.read_bytes(), b"fake subtitled video")
 
-    def test_storyboard_stop_saves_selected_safe_text_without_video_or_media(self):
+    def test_video_prompt_stop_saves_selected_safe_text_without_video_or_media(self):
         self.text_safety.check.side_effect = (
-            lambda stage, text: SafetyResult(text != "storyboard 1", "use safe scenes")
+            lambda stage, text: SafetyResult(text != "video_prompt 1", "use safe scenes")
         )
         # With no supplied media, even constructing FFmpegMedia is unnecessary.
         with patch("vocagent.pipeline.FFmpegMedia") as media_factory:
             result = Workflow(self.providers).run(
-                " apple ", self.output, stop_after="storyboard",
+                " apple ", self.output, stop_after="video_prompt",
             )
-        self.assertIsInstance(result, StoryboardResult)
+        self.assertIsInstance(result, VideoPromptResult)
         self.assertEqual(result.outline.read_text(), "outline 2")
-        self.assertEqual(result.storyboard.read_text(), "storyboard 2")
+        self.assertEqual(result.video_prompt.read_text(), "video_prompt 2")
         self.assertEqual(json.loads((self.output / "vocabulary.json").read_text()),
                          ["apple"])
         self.assertEqual({path.name for path in self.output.iterdir()},
-                         {"vocabulary.json", "outline.txt", "storyboard.txt",
-                          "outline_candidates", "storyboard_candidates", "benchmark.json"})
+                         {"vocabulary.json", "outline.txt", "video_prompt.txt",
+                          "outline_candidates", "video_prompt_candidates", "benchmark.json"})
         self.assertEqual({
             path.name: path.read_text(encoding="utf-8")
             for path in (self.output / "outline_candidates").iterdir()
@@ -288,13 +288,13 @@ class PipelineTests(unittest.TestCase):
         })
         self.assertEqual({
             path.name: path.read_text(encoding="utf-8")
-            for path in (self.output / "storyboard_candidates").iterdir()
+            for path in (self.output / "video_prompt_candidates").iterdir()
         }, {
-            "candidate-1-attempt-2.txt": "storyboard 2",
-            "candidate-2-attempt-1.txt": "storyboard 3",
+            "candidate-1-attempt-2.txt": "video_prompt 2",
+            "candidate-2-attempt-1.txt": "video_prompt 3",
         })
         self.assertEqual(self.text_quality.choose.call_count, 2)
-        self.assertEqual(self.llm.generate_storyboard.call_args_list, [
+        self.assertEqual(self.llm.generate_video_prompt.call_args_list, [
             call(("apple",), "outline 2", None),
             call(("apple",), "outline 2", "use safe scenes"),
             call(("apple",), "outline 2", None),
@@ -305,10 +305,10 @@ class PipelineTests(unittest.TestCase):
         steps = {step["name"]: step for step in report["steps"]}
         self.assertEqual(set(steps), {
             "outline.generation", "outline.safety", "outline.selection",
-            "storyboard.generation", "storyboard.safety", "storyboard.selection",
+            "video_prompt.generation", "video_prompt.safety", "video_prompt.selection",
         })
-        self.assertEqual(steps["storyboard.generation"]["calls"], 3)
-        self.assertEqual(steps["storyboard.safety"]["outcomes"], {"passed": 2, "rejected": 1})
+        self.assertEqual(steps["video_prompt.generation"]["calls"], 3)
+        self.assertEqual(steps["video_prompt.safety"]["outcomes"], {"passed": 2, "rejected": 1})
         self.video.generate.assert_not_called()
         self.video_safety.check.assert_not_called()
         self.audio_safety.check.assert_not_called()
@@ -316,22 +316,22 @@ class PipelineTests(unittest.TestCase):
         self.speech_to_text.transcribe.assert_not_called()
         media_factory.assert_not_called()
 
-    def test_storyboard_stop_requires_a_safe_storyboard(self):
+    def test_video_prompt_stop_requires_a_safe_video_prompt(self):
         self.text_safety.check.side_effect = (
-            lambda stage, text: SafetyResult(stage == "outline", "unsafe storyboard")
+            lambda stage, text: SafetyResult(stage == "outline", "unsafe video prompt")
         )
-        with self.assertRaisesRegex(HumanInterventionRequired, "storyboard"):
-            self.workflow.run(["apple"], self.output, stop_after="storyboard")
+        with self.assertRaisesRegex(HumanInterventionRequired, "video_prompt"):
+            self.workflow.run(["apple"], self.output, stop_after="video_prompt")
 
         self.assertTrue((self.output / "outline.txt").is_file())
-        self.assertFalse((self.output / "storyboard.txt").exists())
+        self.assertFalse((self.output / "video_prompt.txt").exists())
         report = json.loads((self.output / "benchmark.json").read_text(encoding="utf-8"))
         self.assertEqual(report["status"], "failed")
-        self.assertIn("storyboard", report["error"]["message"])
+        self.assertIn("video_prompt", report["error"]["message"])
         steps = {step["name"]: step for step in report["steps"]}
-        self.assertEqual(steps["storyboard.generation"]["calls"], 8)
-        self.assertEqual(steps["storyboard.safety"]["outcomes"], {"rejected": 8})
-        self.assertNotIn("storyboard.selection", steps)
+        self.assertEqual(steps["video_prompt.generation"]["calls"], 8)
+        self.assertEqual(steps["video_prompt.safety"]["outcomes"], {"rejected": 8})
+        self.assertNotIn("video_prompt.selection", steps)
         self.video.generate.assert_not_called()
         self.media.extract_audio.assert_not_called()
 
@@ -347,7 +347,7 @@ class PipelineTests(unittest.TestCase):
         events = []
         for label, method in (
             ("outline", self.llm.generate_outline),
-            ("storyboard", self.llm.generate_storyboard),
+            ("video_prompt", self.llm.generate_video_prompt),
             ("video", self.video.generate),
             ("text safety", self.text_safety.check),
             ("extract audio", self.media.extract_audio),
@@ -369,11 +369,11 @@ class PipelineTests(unittest.TestCase):
             lambda stage, vocabulary, candidates: len(candidates) - 1
         )
         self.video_quality.choose.side_effect = (
-            lambda storyboard, candidates: len(candidates) - 1
+            lambda video_prompt, candidates: len(candidates) - 1
         )
         for counts in ({}, {
             "outline_candidate_count": 1,
-            "storyboard_candidate_count": 3,
+            "video_prompt_candidate_count": 3,
             "video_candidate_count": 5,
         }):
             with self.subTest(counts=counts):
@@ -383,14 +383,14 @@ class PipelineTests(unittest.TestCase):
 
                 self.assertEqual(events, (
                     ["outline", "text safety"] * counts.get("outline_candidate_count", 2)
-                    + ["storyboard", "text safety"] * counts.get("storyboard_candidate_count", 2)
+                    + ["video_prompt", "text safety"] * counts.get("video_prompt_candidate_count", 2)
                     + ["video", "extract audio", "transcribe", "video safety", "audio safety"]
                     * counts.get("video_candidate_count", 2)
                 ))
 
     def test_both_default_generations_overlap_in_each_stage_when_enabled(self):
         for generator in (
-            self.llm.generate_outline, self.llm.generate_storyboard, self.video.generate,
+            self.llm.generate_outline, self.llm.generate_video_prompt, self.video.generate,
         ):
             barrier = Barrier(2, timeout=5)
             original = generator.side_effect
@@ -406,12 +406,12 @@ class PipelineTests(unittest.TestCase):
 
         self.assertTrue(result.final_video.is_file())
         self.assertEqual(self.llm.generate_outline.call_count, 2)
-        self.assertEqual(self.llm.generate_storyboard.call_count, 2)
+        self.assertEqual(self.llm.generate_video_prompt.call_count, 2)
         self.assertEqual(self.video.generate.call_count, 2)
         report = json.loads(result.benchmarks.read_text(encoding="utf-8"))
         for name in (
-            "outline.generation", "outline.safety", "storyboard.generation",
-            "storyboard.safety", "video.generation", "audio.extraction",
+            "outline.generation", "outline.safety", "video_prompt.generation",
+            "video_prompt.safety", "video.generation", "audio.extraction",
             "speech.transcription", "video.safety", "audio.safety",
         ):
             with self.subTest(step=name):
@@ -426,11 +426,11 @@ class PipelineTests(unittest.TestCase):
             lambda stage, vocabulary, candidates: len(candidates) - 1
         )
         self.video_quality.choose.side_effect = (
-            lambda storyboard, candidates: len(candidates) - 1
+            lambda video_prompt, candidates: len(candidates) - 1
         )
         for generator, count in (
             (self.llm.generate_outline, 1),
-            (self.llm.generate_storyboard, 3),
+            (self.llm.generate_video_prompt, 3),
             (self.video.generate, 5),
         ):
             barrier = Barrier(count, timeout=5)
@@ -445,22 +445,22 @@ class PipelineTests(unittest.TestCase):
         workflow = Workflow(
             self.providers, self.media,
             outline_candidate_count=1,
-            storyboard_candidate_count=3,
+            video_prompt_candidate_count=3,
             video_candidate_count=5,
             concurrent_candidates=True,
         )
         result = workflow.run(["apple"], self.output)
 
         self.assertEqual(self.llm.generate_outline.call_count, 1)
-        self.assertEqual(self.llm.generate_storyboard.call_count, 3)
+        self.assertEqual(self.llm.generate_video_prompt.call_count, 3)
         self.assertEqual(self.video.generate.call_count, 5)
-        storyboard_call, = self.text_quality.choose.call_args_list
-        self.assertEqual(storyboard_call.args[:2], ("storyboard", ("apple",)))
-        self.assertEqual(len(storyboard_call.args[2]), 3)
+        video_prompt_call, = self.text_quality.choose.call_args_list
+        self.assertEqual(video_prompt_call.args[:2], ("video_prompt", ("apple",)))
+        self.assertEqual(len(video_prompt_call.args[2]), 3)
         self.assertEqual(result.outline.read_text(), "outline 1")
-        self.assertEqual(result.storyboard.read_text(), storyboard_call.args[2][-1])
+        self.assertEqual(result.video_prompt.read_text(), video_prompt_call.args[2][-1])
         for stage, candidates in (
-            ("outline", ("outline 1",)), ("storyboard", storyboard_call.args[2]),
+            ("outline", ("outline 1",)), ("video_prompt", video_prompt_call.args[2]),
         ):
             self.assertEqual({
                 path.name: path.read_text(encoding="utf-8")
@@ -479,7 +479,7 @@ class PipelineTests(unittest.TestCase):
 
     def test_invalid_candidate_counts_are_rejected_before_starting_work(self):
         for name in (
-            "outline_candidate_count", "storyboard_candidate_count", "video_candidate_count",
+            "outline_candidate_count", "video_prompt_candidate_count", "video_candidate_count",
         ):
             for count in (0, -1, True, False, 1.5, "4", None):
                 with self.subTest(name=name, count=count):
@@ -487,7 +487,7 @@ class PipelineTests(unittest.TestCase):
                         Workflow(self.providers, self.media, **{name: count})
         self.assertFalse(self.output.exists())
         self.llm.generate_outline.assert_not_called()
-        self.llm.generate_storyboard.assert_not_called()
+        self.llm.generate_video_prompt.assert_not_called()
         self.video.generate.assert_not_called()
 
     def test_text_safety_feedback_reaches_only_the_retried_stage(self):
@@ -513,7 +513,7 @@ class PipelineTests(unittest.TestCase):
             "candidate-2-attempt-1.txt": "outline 3",
         })
         self.assertEqual(
-            self.llm.generate_storyboard.call_args_list,
+            self.llm.generate_video_prompt.call_args_list,
             [call(("apple",), chosen_outline, None)] * 2,
         )
 
@@ -536,7 +536,7 @@ class PipelineTests(unittest.TestCase):
 
         self.text_quality.choose.side_effect = choose
         with self.assertRaises(RuntimeError) as raised:
-            self.workflow.run(["apple"], self.output, stop_after="storyboard")
+            self.workflow.run(["apple"], self.output, stop_after="video_prompt")
 
         self.assertIs(raised.exception, failure)
         self.assertEqual({
@@ -547,10 +547,10 @@ class PipelineTests(unittest.TestCase):
             for slot, text in enumerate(outlines, start=1)
         })
         self.assertFalse((self.output / "outline.txt").exists())
-        self.llm.generate_storyboard.assert_not_called()
+        self.llm.generate_video_prompt.assert_not_called()
 
     def test_invalid_quality_decisions_are_recorded_as_failed_selections(self):
-        for rejected_stage in ("outline", "storyboard", "video"):
+        for rejected_stage in ("outline", "video_prompt", "video"):
             with self.subTest(stage=rejected_stage):
                 self.text_quality.choose.side_effect = (
                     lambda stage, vocabulary, candidates, rejected_stage=rejected_stage:
@@ -570,12 +570,12 @@ class PipelineTests(unittest.TestCase):
                 self.assertEqual(failed_call["error"]["type"], "ValueError")
                 self.assertEqual(failed_call["metadata"], {"candidate_count": 2})
 
-    def test_accepted_texts_survive_a_later_storyboard_provider_failure(self):
-        failure = RuntimeError("storyboard provider unavailable")
-        self.llm.generate_storyboard.side_effect = ["Accepted storyboard 苹果.", failure]
+    def test_accepted_texts_survive_a_later_video_prompt_provider_failure(self):
+        failure = RuntimeError("video prompt provider unavailable")
+        self.llm.generate_video_prompt.side_effect = ["Accepted video prompt 苹果.", failure]
 
         with self.assertRaises(RuntimeError) as raised:
-            self.workflow.run(["apple"], self.output, stop_after="storyboard")
+            self.workflow.run(["apple"], self.output, stop_after="video_prompt")
 
         self.assertIs(raised.exception, failure)
         self.assertEqual({
@@ -588,29 +588,29 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual((self.output / "outline.txt").read_text(), "outline 2")
         self.assertEqual({
             path.name: path.read_text(encoding="utf-8")
-            for path in (self.output / "storyboard_candidates").iterdir()
-        }, {"candidate-1-attempt-1.txt": "Accepted storyboard 苹果."})
-        self.assertFalse((self.output / "storyboard.txt").exists())
-        self.assertEqual(self.llm.generate_storyboard.call_count, 2)
+            for path in (self.output / "video_prompt_candidates").iterdir()
+        }, {"candidate-1-attempt-1.txt": "Accepted video prompt 苹果."})
+        self.assertFalse((self.output / "video_prompt.txt").exists())
+        self.assertEqual(self.llm.generate_video_prompt.call_count, 2)
         self.text_quality.choose.assert_called_once()
         self.video.generate.assert_not_called()
         report = json.loads((self.output / "benchmark.json").read_text(encoding="utf-8"))
         self.assertEqual(report["status"], "failed")
-        self.assertIn("storyboard provider unavailable", report["error"]["message"])
+        self.assertIn("video prompt provider unavailable", report["error"]["message"])
         steps = {step["name"]: step for step in report["steps"]}
-        self.assertEqual(steps["storyboard.generation"]["calls"], 2)
-        self.assertEqual(steps["storyboard.generation"]["failed_calls"], 1)
-        self.assertEqual(steps["storyboard.safety"]["calls"], 1)
-        self.assertNotIn("storyboard.selection", steps)
+        self.assertEqual(steps["video_prompt.generation"]["calls"], 2)
+        self.assertEqual(steps["video_prompt.generation"]["failed_calls"], 1)
+        self.assertEqual(steps["video_prompt.safety"]["calls"], 1)
+        self.assertNotIn("video_prompt.selection", steps)
         failed_call, = [item for item in report["calls"] if item["status"] == "failed"]
-        self.assertEqual(failed_call["name"], "storyboard.generation")
+        self.assertEqual(failed_call["name"], "video_prompt.generation")
         self.assertEqual(failed_call["metadata"], {"slot": 2, "attempt": 1})
 
     def test_unsafe_video_is_deleted_before_regeneration_without_feedback(self):
         rejected = self.output / "video_candidates" / "candidate-1-attempt-1.mp4"
         rejected_artifacts = [rejected.with_suffix(suffix) for suffix in (".mp4", ".wav", ".json")]
 
-        def generate(storyboard, output_path):
+        def generate(video_prompt, output_path):
             if output_path.name == "candidate-1-attempt-2.mp4":
                 self.assertTrue(all(not path.exists() for path in rejected_artifacts))
             output_path.write_bytes(b"fake video")
@@ -628,7 +628,7 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(self.speech_to_text.transcribe.call_count, 3)
         self.assertEqual(self.audio_safety.check.call_count, 3)
         self.assertTrue(all(len(item.args) == 2 for item in self.video.generate.call_args_list))
-        self.assertTrue(all(item.args[0] == result.storyboard.read_text()
+        self.assertTrue(all(item.args[0] == result.video_prompt.read_text()
                             for item in self.video.generate.call_args_list))
         survivors = self.video_quality.choose.call_args.args[1]
         self.assertEqual(len(survivors), 2)
@@ -638,7 +638,7 @@ class PipelineTests(unittest.TestCase):
     def test_unsafe_audio_retries_and_removes_all_attempt_artifacts(self):
         rejected = self.output / "video_candidates" / "candidate-1-attempt-1.mp4"
 
-        def generate(storyboard, output_path):
+        def generate(video_prompt, output_path):
             if output_path.name == "candidate-1-attempt-2.mp4":
                 for suffix in (".mp4", ".wav", ".json"):
                     self.assertFalse(rejected.with_suffix(suffix).exists())
@@ -664,7 +664,7 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(self.speech_to_text.transcribe.call_count, 3)
         for generated in self.video.generate.call_args_list:
             self.assertEqual(len(generated.args), 2)
-            self.assertEqual(generated.args[0], result.storyboard.read_text())
+            self.assertEqual(generated.args[0], result.video_prompt.read_text())
         for suffix in (".mp4", ".wav", ".json"):
             self.assertFalse(rejected.with_suffix(suffix).exists())
 
@@ -729,10 +729,10 @@ class PipelineTests(unittest.TestCase):
         self.llm.generate_outline.assert_not_called()
         self.video.generate.assert_not_called()
 
-    def test_storyboard_only_does_not_require_video_capacity(self):
+    def test_video_prompt_only_does_not_require_video_capacity(self):
         self.video_quality.validate_candidate_count = Mock(side_effect=ValueError("too many videos"))
-        result = self.workflow.run(["apple"], self.output, stop_after="storyboard")
-        self.assertIsInstance(result, StoryboardResult)
+        result = self.workflow.run(["apple"], self.output, stop_after="video_prompt")
+        self.assertIsInstance(result, VideoPromptResult)
         self.video_quality.validate_candidate_count.assert_not_called()
 
     def test_winner_reuses_its_own_audio_and_original_transcript_for_subtitles(self):
@@ -827,27 +827,27 @@ class PipelineTests(unittest.TestCase):
         self.assertIn("Spoken by candidate-2-attempt-1: apple.", result.subtitles.read_text())
         self.assertNotIn("candidate-1-attempt-1", result.subtitles.read_text())
 
-    def test_all_unsafe_outline_stops_before_storyboard(self):
+    def test_all_unsafe_outline_stops_before_video_prompt(self):
         self.text_safety.check.return_value = SafetyResult(False, "unsafe outline")
 
         with self.assertRaisesRegex(HumanInterventionRequired, "outline"):
             self.workflow.run(["apple"], self.output)
 
         self.assertEqual(self.llm.generate_outline.call_count, 8)
-        self.llm.generate_storyboard.assert_not_called()
+        self.llm.generate_video_prompt.assert_not_called()
         self.text_quality.choose.assert_not_called()
         self.video.generate.assert_not_called()
         self.media.extract_audio.assert_not_called()
 
-    def test_all_unsafe_storyboards_stop_before_video(self):
+    def test_all_unsafe_video_prompts_stop_before_video(self):
         self.text_safety.check.side_effect = (
-            lambda stage, text: SafetyResult(stage != "storyboard", "unsafe storyboard")
+            lambda stage, text: SafetyResult(stage != "video_prompt", "unsafe video prompt")
         )
 
-        with self.assertRaisesRegex(HumanInterventionRequired, "storyboard"):
+        with self.assertRaisesRegex(HumanInterventionRequired, "video_prompt"):
             self.workflow.run(["apple"], self.output)
 
-        self.assertEqual(self.llm.generate_storyboard.call_count, 8)
+        self.assertEqual(self.llm.generate_video_prompt.call_count, 8)
         self.assertEqual(self.text_quality.choose.call_count, 1)
         self.video.generate.assert_not_called()
         self.media.extract_audio.assert_not_called()
@@ -919,7 +919,7 @@ class PipelineTests(unittest.TestCase):
         for write_empty in (False, True):
             with self.subTest(write_empty=write_empty):
                 self.video.generate.side_effect = (
-                    lambda storyboard, path: path.write_bytes(b"") if write_empty else None
+                    lambda video_prompt, path: path.write_bytes(b"") if write_empty else None
                 )
                 output = self.output / str(write_empty)
                 with self.assertRaisesRegex(ValueError, "nonempty video"):

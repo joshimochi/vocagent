@@ -24,10 +24,10 @@ class LLMGenerator:
     ) -> str:
         raise NotImplementedError("Implement LLMGenerator.generate_outline")
 
-    def generate_storyboard(
+    def generate_video_prompt(
         self, vocabulary: Sequence[str], outline: str, feedback: str | None
     ) -> str:
-        raise NotImplementedError("Implement LLMGenerator.generate_storyboard")
+        raise NotImplementedError("Implement LLMGenerator.generate_video_prompt")
 
 
 class TextSafetyAgent:
@@ -44,7 +44,7 @@ class TextQualityAgent:
 
 
 class VideoGenerator:
-    def generate(self, storyboard: str, output_path: Path) -> None:
+    def generate(self, video_prompt: str, output_path: Path) -> None:
         """Write a video with an audio track to output_path."""
         raise NotImplementedError("Implement VideoGenerator.generate")
 
@@ -67,7 +67,7 @@ class VideoQualityModel:
         if type(count) is not int or count < 1:
             raise ValueError("Video candidate count must be a positive integer.")
 
-    def choose(self, storyboard: str, candidates: Sequence[Path]) -> int:
+    def choose(self, video_prompt: str, candidates: Sequence[Path]) -> int:
         """Return the zero-based index of the best safe video."""
         raise NotImplementedError("Implement a specialized VideoQualityModel.choose")
 

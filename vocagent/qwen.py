@@ -12,7 +12,7 @@ import re
 from typing import Protocol, Sequence
 
 from .models import SafetyResult
-from .prompts.generation import outline_prompt, storyboard_prompt
+from .prompts.generation import outline_prompt, video_prompt
 from .prompts.quality import (
     QUALITY_PROMPT, VIDEO_CANDIDATE_TEMPLATE, VIDEO_FRAME_TEMPLATE, VIDEO_QUALITY_PROMPT,
 )
@@ -39,28 +39,28 @@ class ChatClient(Protocol):
 
 
 class QwenGenerator(LLMGenerator):
-    def __init__(self, client: ChatClient, *, storyboard_seconds: float):
+    def __init__(self, client: ChatClient, *, video_prompt_seconds: float):
         if (
-            isinstance(storyboard_seconds, bool) or not isinstance(storyboard_seconds, (int, float))
-            or not math.isfinite(storyboard_seconds) or storyboard_seconds <= 0
+            isinstance(video_prompt_seconds, bool) or not isinstance(video_prompt_seconds, (int, float))
+            or not math.isfinite(video_prompt_seconds) or video_prompt_seconds <= 0
         ):
-            raise ValueError("Storyboard duration must be a finite positive number of seconds.")
+            raise ValueError("Video prompt duration must be a finite positive number of seconds.")
         self.client = client
-        self.storyboard_seconds = storyboard_seconds
+        self.video_prompt_seconds = video_prompt_seconds
 
     def generate_outline(self, vocabulary: Sequence[str], feedback: str | None) -> str:
-        prompt = outline_prompt(self.storyboard_seconds)
+        prompt = outline_prompt(self.video_prompt_seconds)
         inputs = {"target_word": normalize_target_word(vocabulary)}
         return self._generate(prompt, inputs, feedback, 1024)
 
-    def generate_storyboard(
+    def generate_video_prompt(
         self, vocabulary: Sequence[str], outline: str, feedback: str | None,
     ) -> str:
         inputs = {
             "target_word": normalize_target_word(vocabulary),
             "outline": outline,
         }
-        prompt = storyboard_prompt(self.storyboard_seconds)
+        prompt = video_prompt(self.video_prompt_seconds)
         return self._generate(prompt, inputs, feedback, 2048)
 
     def _generate(self, prompt: str, inputs: dict, feedback: str | None, max_tokens: int) -> str:
@@ -86,8 +86,8 @@ _GUARD_OUTPUT = re.compile(
 
 
 def _validate_stage(stage: str) -> None:
-    if stage not in ("outline", "storyboard"):
-        raise ValueError("Qwen text stage must be outline or storyboard.")
+    if stage not in ("outline", "video_prompt"):
+        raise ValueError("Qwen text stage must be outline or video_prompt.")
 
 
 class QwenGuard(TextSafetyAgent):
@@ -96,7 +96,7 @@ class QwenGuard(TextSafetyAgent):
 
     def check(self, stage: str, text: str) -> SafetyResult:
         _validate_stage(stage)
-        return self._check_response(TEXT_SAFETY_PROMPT.format(stage=stage), text)
+        return self._check_response(TEXT_SAFETY_PROMPT.format(stage=stage.replace("_", " ")), text)
 
     def _check_response(self, prompt: str, text: str) -> SafetyResult:
         if not isinstance(text, str) or not text.strip():
@@ -211,9 +211,9 @@ class QwenVideoQuality(VideoQualityModel):
                 f"({self.max_total_frames} total sampled frames)."
             )
 
-    def choose(self, storyboard: str, candidates: Sequence[Path]) -> int:
-        if not isinstance(storyboard, str) or not storyboard.strip():
-            raise ValueError("Qwen video selection requires a nonempty storyboard.")
+    def choose(self, video_prompt: str, candidates: Sequence[Path]) -> int:
+        if not isinstance(video_prompt, str) or not video_prompt.strip():
+            raise ValueError("Qwen video selection requires a nonempty video prompt.")
         if (isinstance(candidates, (str, bytes, Path)) or not candidates
                 or any(not isinstance(path, (str, Path)) for path in candidates)):
             raise ValueError("Qwen video selection requires nonempty video candidates.")
@@ -222,7 +222,7 @@ class QwenVideoQuality(VideoQualityModel):
         self.validate_candidate_count(len(candidates))
         content: list[dict[str, object]] = [
             {"type": "text", "text": json.dumps({
-                "storyboard": storyboard,
+                "video_prompt": video_prompt,
             }, ensure_ascii=False)}
         ]
         for index, path in enumerate(candidates):

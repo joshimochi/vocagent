@@ -11,7 +11,12 @@ established interactive session. Detached validation jobs use locks and log file
 so connection loss does not duplicate model loads.
 
 The current source accepts exactly one English target word and focuses its
-English outline, storyboard, and dialogue on one clear meaning of that word.
+English outline, video prompt, and dialogue on one clear meaning of that word.
+Video prompt generation now includes the full bundled
+[`h3_prompt_guide.md`](../vocagent/prompts/h3_prompt_guide.md), which covers only
+T2VA, and keeps the cartoon style, English speech, duration and speaking budget in
+the task-specific instructions. The stage's Python name is `video_prompt`; the
+CLI uses `--stop-after video-prompt` and `--video-prompt-candidate-count`.
 Exact target-word matching in recognized speech has been removed; ASR supplies
 transcript safety review and subtitles.
 These source and prompt changes still need upload and validation on `hs`; the
@@ -79,13 +84,14 @@ Still required:
 
 The complete test suite passed on hs: **177 tests, no skips**, including numerical
 convolution checks and real FFmpeg integration. [Test record](validation/tests-hs.json).
-The current local suite ran with `TMPDIR=/private/tmp`: **205 tests: 201 passed,
+The previously recorded local suite ran with `TMPDIR=/private/tmp`: **205 tests: 201 passed,
 3 failed, and 1 skipped**. The media-installer failures are due to the missing
 `flock` utility on macOS. All 39 workflow and input-validation tests pass.
 Coverage includes single-word input validation, English prompts and speech
 configuration, acceptance of safe transcripts without the exact target word,
 early candidate-capacity validation, native image messages, and complete provider
-bundles, plus plain storyboard generation without format repair. The
+bundles, plus the earlier text generation behavior without format repair. This
+record predates the video prompt rename and H3 guide integration. The
 [earlier local test record](validation/tests-local-final.json)
 preserves the validation before the provider cleanup. The earlier reported local
 suite had 179 tests (165 passed and 14 skipped). An unskipped run of the
@@ -175,8 +181,8 @@ Validate text first, then the complete agent, using one English target word and
 new output directories:
 
 ```sh
-bash deploy/run_hs.sh curious --stop-after storyboard \
-  --outline-candidate-count 1 --storyboard-candidate-count 1 \
+bash deploy/run_hs.sh curious --stop-after video-prompt \
+  --outline-candidate-count 1 --video-prompt-candidate-count 1 \
   --output-dir /data/group6/vocagent/outputs/a406-text-smoke
 
 bash deploy/run_hs.sh curious \

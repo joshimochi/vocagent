@@ -47,7 +47,7 @@ def create_providers(environ: Mapping[str, str] | None = None) -> Providers:
     )
     return LocalProviders(
         runtime=runtime,
-        llm=QwenGenerator(LocalChatClient(runtime, vl, vision=True), storyboard_seconds=settings.seconds),
+        llm=QwenGenerator(LocalChatClient(runtime, vl, vision=True), video_prompt_seconds=settings.seconds),
         text_safety=QwenGuard(LocalChatClient(runtime, guard)),
         text_quality=QwenQuality(LocalChatClient(runtime, vl, vision=True)),
         video=IsolatedMiniMaxH3VideoGenerator(

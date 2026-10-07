@@ -19,7 +19,7 @@ class QwenTests(unittest.TestCase):
     def setUp(self):
         self.client = Mock(spec=ChatClient)
         self.complete = self.client.complete
-        self.generator = QwenGenerator(self.client, storyboard_seconds=10)
+        self.generator = QwenGenerator(self.client, video_prompt_seconds=10)
         self.guard = QwenGuard(self.client)
         self.quality = QwenQuality(self.client)
 
@@ -51,6 +51,8 @@ class QwenTests(unittest.TestCase):
         self.assertIn("one clear meaning throughout", data["messages"][0]["content"])
         self.assertIn("Write all text in English", data["messages"][0]["content"])
         self.assertIn("Repeat the target word naturally", data["messages"][0]["content"])
+        self.assertNotIn("# Video Prompt Writing Guide", data["messages"][0]["content"])
+        self.assertNotIn("integrated_multimodal_description", data["messages"][0]["content"])
 
     def test_generation_calls_do_not_share_conversation_state(self):
         def serve(messages, **kwargs):
@@ -65,23 +67,31 @@ class QwenTests(unittest.TestCase):
             ))
         self.assertEqual(results, ["one", "two", "three", "four"])
 
-    def test_local_storyboard_uses_plain_prompt_and_returns_response_in_one_call(self):
-        storyboard = (
-            "Scene 1 (0–10 seconds): A friend catches an apple.\n"
-            'Dialogue: "An apple! Catch the apple!"\nAudio: Leaves rustle.'
+    def test_local_video_prompt_includes_h3_guide_and_returns_response_in_one_call(self):
+        video_prompt = (
+            "integrated_multimodal_description: [Shot 1] 2D cartoon animation, "
+            "a friend with a gentle, clear voice (S1) catches an apple and says: "
+            "<d>[English] An apple! Catch the apple!</d>\n\n"
+            "overall_soundscape: Leaves rustle.\n\n"
+            "non_diegetic_music: N/A"
         )
-        self.reply(storyboard)
-        self.assertEqual(self.generator.generate_storyboard(
+        self.reply(video_prompt)
+        self.assertEqual(self.generator.generate_video_prompt(
             [" apple "], "A friend catches an apple.", "Use a gentle scene.",
-        ), storyboard)
+        ), video_prompt)
         data = self.sent()
         prompt = data["messages"][0]["content"]
-        self.assertIn("storyboard for a short vocabulary-learning video", prompt)
-        self.assertIn("State the cartoon animation style in the storyboard", prompt)
-        self.assertIn("scene durations, visuals/action, spoken dialogue or narration", prompt)
-        self.assertNotIn("MiniMax H3", prompt)
-        self.assertNotIn("integrated_multimodal_description", prompt)
-        self.assertNotIn("<d>", prompt)
+        guide = (Path(__file__).resolve().parents[1] / "vocagent" / "prompts" /
+                 "h3_prompt_guide.md").read_text(encoding="utf-8")
+        self.assertIn(guide, prompt)
+        self.assertIn("video prompt for a short vocabulary-learning video", prompt)
+        self.assertIn("State the cartoon animation style in the video prompt", prompt)
+        self.assertIn("scene timing, visuals/action, spoken dialogue or narration", prompt)
+        self.assertIn("MiniMax H3", prompt)
+        self.assertIn("integrated_multimodal_description", prompt)
+        self.assertIn("overall_soundscape", prompt)
+        self.assertIn("non_diegetic_music", prompt)
+        self.assertIn("<d>[English]", prompt)
         self.assertIn("hard duration of 10 seconds", prompt)
         self.assertIn("at most 20 spoken English words TOTAL", prompt)
         self.assertIn("normal speaking pace", prompt)
@@ -94,25 +104,28 @@ class QwenTests(unittest.TestCase):
             "target_word": "apple", "outline": "A friend catches an apple.",
             "safety_feedback": "Use a gentle scene.",
         })
+        for supplied_data in ("apple", "A friend catches an apple.", "Use a gentle scene."):
+            self.assertNotIn(supplied_data, prompt)
+        self.assertEqual([message["role"] for message in data["messages"]], ["system", "user"])
         self.assertEqual(data["max_tokens"], 2048)
         self.assertEqual(data["temperature"], 0.7)
         self.assertTrue(data["non_thinking"])
         self.complete.assert_called_once()
 
-    def test_local_storyboard_never_retries_backend_or_truncation_errors(self):
+    def test_local_video_prompt_never_retries_backend_or_truncation_errors(self):
         for failure in (QwenError("GPU inference failed"), QwenError("truncated output")):
             with self.subTest(failure=failure):
                 self.complete.reset_mock()
                 self.complete.side_effect = failure
                 with self.assertRaises(QwenError) as caught:
-                    self.generator.generate_storyboard(["hello"], "A friend arrives.", None)
+                    self.generator.generate_video_prompt(["hello"], "A friend arrives.", None)
                 self.assertIs(caught.exception, failure)
                 self.complete.assert_called_once()
 
-    def test_storyboard_duration_is_required_and_rejects_invalid_limits(self):
+    def test_video_prompt_duration_is_required_and_rejects_invalid_limits(self):
         for seconds in (None, 0, -1, True, float("nan"), float("inf"), "10"):
             with self.subTest(seconds=seconds), self.assertRaises(ValueError):
-                QwenGenerator(self.generator.client, storyboard_seconds=seconds)
+                QwenGenerator(self.generator.client, video_prompt_seconds=seconds)
         with self.assertRaises(TypeError):
             QwenGenerator(self.client)
         self.complete.assert_not_called()
@@ -132,7 +145,7 @@ class QwenTests(unittest.TestCase):
         for label in ("Unsafe", "Controversial"):
             with self.subTest(label=label):
                 self.reply(f"Safety: {label}\nCategories: Violent, Unethical Acts\nRefusal: No")
-                result = self.guard.check("storyboard", "candidate")
+                result = self.guard.check("video_prompt", "candidate")
                 self.assertIs(result.safe, False)
                 self.assertIn(label, result.reason)
                 self.assertIn("Violent", result.reason)
@@ -164,12 +177,12 @@ class QwenTests(unittest.TestCase):
 
     def test_quality_judge_receives_only_safe_survivor_indexes(self):
         self.reply('{"index": 1}')
-        result = self.quality.choose("storyboard", ["apple"], ["first", "second"])
+        result = self.quality.choose("video_prompt", ["apple"], ["first", "second"])
         self.assertEqual(result, 1)
         data = self.sent()
         self.assertTrue(data["non_thinking"])
         self.assertEqual(json.loads(data["messages"][1]["content"]), {
-            "stage": "storyboard", "target_word": "apple",
+            "stage": "video_prompt", "target_word": "apple",
             "candidates": [{"index": 0, "text": "first"}, {"index": 1, "text": "second"}],
         })
         prompt = data["messages"][0]["content"]
@@ -225,7 +238,7 @@ class QwenTests(unittest.TestCase):
         ):
             for invoke in (
                 lambda: self.generator.generate_outline(vocabulary, None),
-                lambda: self.generator.generate_storyboard(vocabulary, "An outline.", None),
+                lambda: self.generator.generate_video_prompt(vocabulary, "An outline.", None),
                 lambda: self.quality.choose("outline", vocabulary, ["A story."]),
             ):
                 with self.subTest(vocabulary=vocabulary, invoke=invoke), self.assertRaises(ValueError):
@@ -258,14 +271,14 @@ class QwenTests(unittest.TestCase):
         ]
         self.reply('{"index": 1}')
         with patch("vocagent.qwen.sample_video_frames", side_effect=frames) as sampler:
-            self.assertEqual(judge.choose("A clear storyboard.", [Path("a.mp4"), Path("b.mp4")]), 1)
+            self.assertEqual(judge.choose("A clear video prompt.", [Path("a.mp4"), Path("b.mp4")]), 1)
         self.assertEqual(sampler.call_count, 2)
         self.assertEqual(sampler.call_args_list[0].kwargs, {"max_frames": 2, "max_side": 448})
         data = self.sent()
         self.assertTrue(data["non_thinking"])
         content = data["messages"][1]["content"]
         self.assertEqual(json.loads(content[0]["text"]), {
-            "storyboard": "A clear storyboard.",
+            "video_prompt": "A clear video prompt.",
         })
         self.assertIn("cartoon animation", data["messages"][0]["content"])
         self.assertIn("exactly one English target word", data["messages"][0]["content"])

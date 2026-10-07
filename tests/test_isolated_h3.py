@@ -142,7 +142,7 @@ class IsolatedH3Tests(unittest.TestCase):
                 report_path = Path(directory) / "benchmark.json"
                 request_path.write_text(json.dumps({
                     "backend": "musa", "model": "/models/H3", "settings": {},
-                    "storyboard": "hello", "output": str(Path(directory) / "video.mp4"),
+                    "video_prompt": "hello", "output": str(Path(directory) / "video.mp4"),
                     "benchmark_output": str(report_path),
                 }))
                 runtime = Mock()
@@ -177,7 +177,7 @@ class IsolatedH3Tests(unittest.TestCase):
                 self.assertTrue(state["active"])
                 self.assertEqual(command[:3], ["/env/bin/python", "-m", "vocagent.h3_worker"])
                 request = json.loads(Path(command[3]).read_text())
-                self.assertEqual(request['storyboard'], '说 hello; $(not-a-command)')
+                self.assertEqual(request['video_prompt'], '说 hello; $(not-a-command)')
                 self.assertEqual(request['backend'], 'musa')
                 self.assertEqual(request['settings'], {'steps': 12, 'profile': 'quality'})
                 self.assertEqual(H3Settings(**request['settings']), provider.settings)
@@ -199,7 +199,7 @@ class IsolatedH3Tests(unittest.TestCase):
         )
         worker_runtime = Mock()
         native_generator = Mock()
-        native_generator.generate.side_effect = lambda storyboard, output: output.write_bytes(b'preview')
+        native_generator.generate.side_effect = lambda video_prompt, output: output.write_bytes(b'preview')
 
         def run(command, **kwargs):
             self.assertTrue(state['active'])
@@ -259,7 +259,7 @@ class IsolatedH3Tests(unittest.TestCase):
                 path = Path(directory) / "request.json"
                 path.write_text(json.dumps({
                     "backend": "musa", "model": "/models/H3", "settings": {},
-                    "storyboard": "hello", "output": str(Path(directory) / "video.mp4"),
+                    "video_prompt": "hello", "output": str(Path(directory) / "video.mp4"),
                 }))
                 runtime = Mock()
                 generator = Mock()
