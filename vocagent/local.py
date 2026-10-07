@@ -40,8 +40,10 @@ def create_providers(environ: Mapping[str, str] | None = None) -> Providers:
     from .minimax import H3Settings
     from .isolated_h3 import IsolatedMiniMaxH3VideoGenerator
 
+    profile = env.get("MINIMAX_H3_PROFILE", "quality")
     settings = H3Settings(
-        steps=int(env.get("MINIMAX_H3_STEPS", "50")),
+        steps=int(env.get("MINIMAX_H3_STEPS", "20" if profile == "preview" else "50")),
+        profile=profile,
     )
     return LocalProviders(
         runtime=runtime,

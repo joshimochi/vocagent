@@ -19,16 +19,25 @@ log = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class H3Settings:
-    """Fixed landscape video shape and duration with configurable sigma points."""
+    """Explicit landscape profiles with fixed duration and configurable sigma points."""
 
-    width: ClassVar[int] = 1344
-    height: ClassVar[int] = 768
     seconds: ClassVar[float] = 15
     steps: int = 50
+    profile: str = "quality"
 
     def __post_init__(self):
-        if self.steps < 2:
-            raise ValueError("H3 requires at least two sigma points.")
+        if not isinstance(self.profile, str) or self.profile not in ("quality", "preview"):
+            raise ValueError("H3 profile must be 'quality' or 'preview'.")
+        if isinstance(self.steps, bool) or not isinstance(self.steps, int) or self.steps < 2:
+            raise ValueError("H3 requires an integer number of at least two sigma points.")
+
+    @property
+    def width(self):
+        return 960 if self.profile == "preview" else 1344
+
+    @property
+    def height(self):
+        return 544 if self.profile == "preview" else 768
 
     @property
     def num_frames(self):
@@ -128,6 +137,27 @@ def _patch_audio_convolutions(module):
             child.forward = types.MethodType(upsample, child)
 
 
+def _chunk_h3_rotary_emb(hidden_states, rotary_emb, apply_rotary, chunk_size=8192):
+    """Apply the released RoPE to token slices with GPU-only scratch space.
+
+    H3's cosine/sine arrays have shape (tokens, rotary_dim), while query/key
+    tensors have shape (batch, tokens, heads, head_dim). Each token rotates
+    independently; attention still receives the complete rotated sequence.
+    """
+    if chunk_size < 1:
+        raise ValueError("H3 rotary chunk size must be positive.")
+    if hidden_states.shape[1] <= chunk_size:
+        return apply_rotary(hidden_states, *rotary_emb)
+    cosine, sine = rotary_emb
+    output = hidden_states.new_empty(hidden_states.shape)
+    for start in range(0, hidden_states.shape[1], chunk_size):
+        stop = min(start + chunk_size, hidden_states.shape[1])
+        rotated = apply_rotary(hidden_states[:, start:stop], cosine[start:stop], sine[start:stop])
+        output[:, start:stop] = rotated
+        del rotated
+    return output
+
+
 def _patch_musa_attention(model):
     """Use torch-musa's SDPA kernel with the released H3 attention math."""
     import torch
@@ -147,13 +177,20 @@ def _patch_musa_attention(model):
             key = attn.norm_k(key.unflatten(-1, (attn.heads, -1)))
             value = value.unflatten(-1, (attn.heads, -1))
             if rotary_emb is not None:
-                query = _apply_rotary_emb(query, *rotary_emb)
-                key = _apply_rotary_emb(key, *rotary_emb)
+                query = _chunk_h3_rotary_emb(query, rotary_emb, _apply_rotary_emb)
+                key = _chunk_h3_rotary_emb(key, rotary_emb, _apply_rotary_emb)
+            # Replacing each source releases its untransposed storage before
+            # SDPA allocates scratch space for the full packed sequence.
+            query = query.transpose(1, 2).contiguous()
+            key = key.transpose(1, 2).contiguous()
+            value = value.transpose(1, 2).contiguous()
+            output_dtype = query.dtype
             output = torch.nn.functional.scaled_dot_product_attention(
-                query.transpose(1, 2).contiguous(), key.transpose(1, 2).contiguous(),
-                value.transpose(1, 2).contiguous(), attn_mask=attention_mask,
+                query, key, value, attn_mask=attention_mask,
                 dropout_p=0.0, is_causal=False,
-            ).transpose(1, 2).flatten(2, 3).type_as(query)
+            )
+            del query, key, value
+            output = output.transpose(1, 2).flatten(2, 3).to(dtype=output_dtype)
             return attn.to_out[1](attn.to_out[0](output))
 
     for module in model.modules():
@@ -170,16 +207,24 @@ def _chunk_h3_feed_forwards(model, chunk_size=8192):
     """
     if chunk_size < 1:
         raise ValueError("H3 feed-forward chunk size must be positive.")
-    import torch
 
     def wrap(original):
         def forward(self, hidden_states, *args, **kwargs):
             if hidden_states.shape[1] <= chunk_size:
                 return original(hidden_states, *args, **kwargs)
-            return torch.cat([
-                original(chunk, *args, **kwargs)
-                for chunk in hidden_states.split(chunk_size, dim=1)
-            ], dim=1)
+            output = None
+            offset = 0
+            for chunk in hidden_states.split(chunk_size, dim=1):
+                projected = original(chunk, *args, **kwargs)
+                if output is None:
+                    output = projected.new_empty((
+                        projected.shape[0], hidden_states.shape[1], *projected.shape[2:],
+                    ))
+                length = projected.shape[1]
+                output[:, offset:offset + length] = projected
+                offset += length
+                del projected
+            return output
         return forward
 
     count = 0
@@ -194,6 +239,74 @@ def _chunk_h3_feed_forwards(model, chunk_size=8192):
         block.ff._vocagent_chunk_size = chunk_size
         count += 1
     log.info("Chunked %s H3 feed-forwards at %s tokens per projection.", count, chunk_size)
+
+
+def _chunk_h3_adaln_blocks(model, chunk_size=8192):
+    """Bound packed AdaLN and residual scratch without changing block math.
+
+    Scale, shift and gate tables are selected independently for each token.
+    Normalize/modulate and gated-add bounded slices, then pass the complete
+    normalized sequence to the original attention and feed-forward modules.
+    """
+    if chunk_size < 1:
+        raise ValueError("H3 AdaLN chunk size must be positive.")
+
+    def tokenwise(hidden_states, adaln_indices, operation):
+        output = None
+        for start in range(0, hidden_states.shape[1], chunk_size):
+            stop = min(start + chunk_size, hidden_states.shape[1])
+            projected = operation(start, stop, adaln_indices[start:stop])
+            if output is None:
+                output = projected.new_empty((
+                    projected.shape[0], hidden_states.shape[1], *projected.shape[2:],
+                ))
+            output[:, start:stop] = projected
+            del projected
+        return output
+
+    def modulated_norm(norm, hidden_states, scale, shift, adaln_indices):
+        return tokenwise(hidden_states, adaln_indices, lambda start, stop, indices:
+            norm(hidden_states[:, start:stop]) * (
+                1.0 + scale.index_select(0, indices)
+            ) + shift.index_select(0, indices))
+
+    def gated_residual(hidden_states, branch, gate, adaln_indices):
+        return tokenwise(hidden_states, adaln_indices, lambda start, stop, indices:
+            hidden_states[:, start:stop] + gate.index_select(0, indices) * branch[:, start:stop])
+
+    def wrap(original):
+        def forward(self, hidden_states, temb, adaln_indices, rotary_emb, attention_mask=None):
+            if hidden_states.shape[1] <= chunk_size:
+                return original(hidden_states, temb, adaln_indices, rotary_emb, attention_mask)
+            shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = self.adaln_proj(temb)
+            norm_hidden_states = modulated_norm(
+                self.norm1, hidden_states, scale_msa, shift_msa, adaln_indices,
+            )
+            attn_output = self.attn(norm_hidden_states, rotary_emb, attention_mask)
+            del norm_hidden_states
+            hidden_states = gated_residual(hidden_states, attn_output, gate_msa, adaln_indices)
+            del attn_output, shift_msa, scale_msa, gate_msa
+            norm_hidden_states = modulated_norm(
+                self.norm2, hidden_states, scale_mlp, shift_mlp, adaln_indices,
+            )
+            ff_output = self.ff(norm_hidden_states)
+            del norm_hidden_states
+            return gated_residual(hidden_states, ff_output, gate_mlp, adaln_indices)
+        return forward
+
+    count = 0
+    for block in model.modules():
+        if type(block).__name__ != "MiniMaxH3TransformerBlock":
+            continue
+        configured = getattr(block, "_vocagent_adaln_chunk_size", None)
+        if configured == chunk_size:
+            continue
+        if configured is not None:
+            raise ValueError("H3 AdaLN chunking is already configured.")
+        block.forward = types.MethodType(wrap(block.forward), block)
+        block._vocagent_adaln_chunk_size = chunk_size
+        count += 1
+    log.info("Chunked %s H3 AdaLN blocks at %s tokens per modulation.", count, chunk_size)
 
 
 def _dispatch_resident(model, runtime):
@@ -252,6 +365,65 @@ def _gpu_decode_boundary(vae, device, output_device, *, autocast=False):
     vae.decode = types.MethodType(decode, vae)
 
 
+def _patch_h3_video_decode_device(pipe, device):
+    """Run the released video decode/postprocess step on the VAE's GPU.
+
+    The original step creates latent and pixel constants on its execution
+    device. Override that device only for this block and move its input there;
+    later blocks retain the pipeline's execution device and original latents.
+    """
+    import torch
+    from diffusers.modular_pipelines.minimax_h3.decoders import MiniMaxH3VideoDecodeStep
+
+    device = torch.device(device)
+
+    class DecodeComponents:
+        def __init__(self, components):
+            self._source = components
+
+        @property
+        def _execution_device(self):
+            return device
+
+        def __getattr__(self, name):
+            return getattr(self._source, name)
+
+    def patch_block(block):
+        configured = getattr(block, "_vocagent_decode_device", None)
+        if configured is not None:
+            if configured != str(device):
+                raise ValueError("H3 video decode device is already configured.")
+            return
+        original_call = type(block).__call__
+
+        class GPUVideoDecode(type(block)):
+            _vocagent_decode_device = str(device)
+
+            def __call__(self, components, state):
+                original_latents = state.get("latents")
+                state.set("latents", original_latents.to(device))
+                try:
+                    _, result = original_call(self, DecodeComponents(components), state)
+                finally:
+                    state.set("latents", original_latents)
+                return components, result
+
+        block.__class__ = GPUVideoDecode
+
+    found = 0
+    # The public blocks property returns a deepcopy. Patch the registry that
+    # ModularPipeline actually executes, rather than its inspection snapshot.
+    pending = [pipe._blocks]
+    while pending:
+        block = pending.pop()
+        if isinstance(block, MiniMaxH3VideoDecodeStep):
+            patch_block(block)
+            found += 1
+        pending.extend((getattr(block, "sub_blocks", None) or {}).values())
+    if found != 1:
+        raise RuntimeError("H3 requires exactly one video decode block for GPU placement.")
+
+
 class MiniMaxH3VideoGenerator(VideoGenerator):
     def __init__(self, runtime, model_path, settings=None):
         self.runtime = runtime
@@ -284,7 +456,7 @@ class MiniMaxH3VideoGenerator(VideoGenerator):
         if runtime.backend == "musa":
             _patch_pointwise_conv3d(video_vae)
             _patch_audio_convolutions(audio_vae)
-        _gpu_decode_boundary(video_vae, vae_device, device, autocast=True)
+        _gpu_decode_boundary(video_vae, vae_device, vae_device, autocast=True)
         _gpu_decode_boundary(audio_vae, vae_device, device)
         runtime.assert_on_accelerator(video_vae)
         runtime.assert_on_accelerator(audio_vae)
@@ -300,6 +472,7 @@ class MiniMaxH3VideoGenerator(VideoGenerator):
         if runtime.backend == "musa":
             _patch_musa_attention(transformer)
         _chunk_h3_feed_forwards(transformer)
+        _chunk_h3_adaln_blocks(transformer)
         transformer = _dispatch_resident(transformer, runtime)
         align_h3_residual_outputs(transformer, runtime.device)
 
@@ -320,6 +493,7 @@ class MiniMaxH3VideoGenerator(VideoGenerator):
                 return device
 
         pipe.__class__ = ExplicitDevicePipeline
+        _patch_h3_video_decode_device(pipe, vae_device)
         if runtime.backend == "musa":
             # H3 creates positional metadata in FP64 on the host. S4000 has no
             # FP64 device arithmetic; the model's RoPE itself uses FP32.

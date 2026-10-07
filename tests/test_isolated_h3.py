@@ -179,7 +179,7 @@ class IsolatedH3Tests(unittest.TestCase):
                 request = json.loads(Path(command[3]).read_text())
                 self.assertEqual(request['storyboard'], '说 hello; $(not-a-command)')
                 self.assertEqual(request['backend'], 'musa')
-                self.assertEqual(request['settings'], {'steps': 12})
+                self.assertEqual(request['settings'], {'steps': 12, 'profile': 'quality'})
                 self.assertEqual(H3Settings(**request['settings']), provider.settings)
                 self.assertNotIn('benchmark_output', request)
                 self.assertNotIn('shell', kwargs)
@@ -190,6 +190,37 @@ class IsolatedH3Tests(unittest.TestCase):
                 provider.generate('说 hello; $(not-a-command)', output)
             self.assertFalse(state['active'])
             self.assertEqual([p.name for p in Path(directory).iterdir()], ['clip.mp4'])
+
+    def test_preview_profile_reaches_native_worker_with_full_duration(self):
+        runtime, state = self.runtime()
+        settings = H3Settings(profile='preview', steps=20)
+        provider = IsolatedMiniMaxH3VideoGenerator(
+            runtime, '/models/H3', python_executable='/env/bin/python', settings=settings,
+        )
+        worker_runtime = Mock()
+        native_generator = Mock()
+        native_generator.generate.side_effect = lambda storyboard, output: output.write_bytes(b'preview')
+
+        def run(command, **kwargs):
+            self.assertTrue(state['active'])
+            request = json.loads(Path(command[3]).read_text())
+            self.assertEqual(request['settings'], {'steps': 20, 'profile': 'preview'})
+            worker_main([command[3]])
+
+        with tempfile.TemporaryDirectory() as directory, patch(
+            'vocagent.isolated_h3.subprocess.run', side_effect=run,
+        ), patch('vocagent.h3_worker.GPURuntime', return_value=worker_runtime), patch(
+            'vocagent.h3_worker.MiniMaxH3VideoGenerator', return_value=native_generator,
+        ) as factory:
+            output = Path(directory) / 'clip.mp4'
+            provider.generate('An English teaching scene.', output)
+            self.assertEqual(output.read_bytes(), b'preview')
+            worker_settings = factory.call_args.args[2]
+            self.assertEqual(worker_settings, settings)
+            self.assertEqual((worker_settings.width, worker_settings.height), (960, 544))
+            self.assertEqual(worker_settings.num_frames, 345)
+        self.assertFalse(state['active'])
+        worker_runtime.close.assert_called_once_with()
 
     def test_worker_failure_or_absent_output_never_passes(self):
         runtime, state = self.runtime()

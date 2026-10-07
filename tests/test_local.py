@@ -42,11 +42,33 @@ class LocalFactoryTests(unittest.TestCase):
             self.assertEqual(providers.video.settings.width, 1344)
             self.assertEqual(providers.video.settings.height, 768)
             self.assertEqual(providers.video.settings.seconds, 15)
+            self.assertEqual(providers.video.settings.profile, "quality")
+            self.assertEqual(providers.video.settings.steps, 50)
             self.assertEqual(providers.llm.storyboard_seconds, providers.video.settings.seconds)
             providers.video_quality.validate_candidate_count(2)
             with self.assertRaisesRegex(ValueError, 'at most 2 candidate slots'):
                 providers.video_quality.validate_candidate_count(3)
             self.assertIsNone(providers.runtime._torch)  # import/configuration never loads weights
+
+    def test_preview_factory_defaults_to_20_points_and_accepts_explicit_steps(self):
+        with tempfile.TemporaryDirectory() as directory:
+            for name in ('Qwen3-VL-32B-Instruct', 'Qwen3Guard-Gen-8B',
+                         'Qwen3-ASR-1.7B', 'Qwen3-ForcedAligner-0.6B', 'shieldgemma-2-4b-it'):
+                path = Path(directory) / 'models' / name
+                path.mkdir(parents=True)
+                (path / 'config.json').write_text('{}')
+            env = {'VOCAGENT_DEPLOY_ROOT': directory, 'MINIMAX_H3_PROFILE': 'preview'}
+            for override, expected_steps in (({}, 20), ({'MINIMAX_H3_STEPS': '30'}, 30)):
+                with self.subTest(override=override):
+                    providers = create_providers({**env, **override})
+                    self.assertEqual(providers.video.settings.profile, 'preview')
+                    self.assertEqual((providers.video.settings.width, providers.video.settings.height), (960, 544))
+                    self.assertEqual(providers.video.settings.steps, expected_steps)
+                    self.assertEqual(providers.video.settings.num_frames, 345)
+                    self.assertEqual(providers.llm.storyboard_seconds, providers.video.settings.seconds)
+                    self.assertIsNone(providers.runtime._torch)
+            with self.assertRaisesRegex(ValueError, 'profile'):
+                create_providers({**env, 'MINIMAX_H3_PROFILE': 'fast'})
 
     def test_missing_weights_fail_before_inference(self):
         with tempfile.TemporaryDirectory() as directory:
