@@ -70,10 +70,11 @@ Still required:
 
 The complete test suite passed on hs: **177 tests, no skips**, including numerical
 convolution checks and real FFmpeg integration. [Test record](validation/tests-hs.json).
-The current local suite runs 184 tests: 170 pass and 14 checks skip because
+The current local suite runs 179 tests: 165 pass and 14 checks skip because
 PyTorch and FFmpeg are unavailable. Coverage includes spoken vocabulary,
 early candidate-capacity validation, native image messages, and complete provider
-bundles. The [earlier local test record](validation/tests-local-final.json)
+bundles, plus plain storyboard generation without format repair. The
+[earlier local test record](validation/tests-local-final.json)
 preserves the validation before the provider cleanup. An unskipped run of the
 current source on hs is pending restored SSH access. These tests complement the
 live model probes. The first full workflow passed the complete sequence; a

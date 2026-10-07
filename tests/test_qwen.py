@@ -60,116 +60,44 @@ class QwenTests(unittest.TestCase):
             ))
         self.assertEqual(results, ["one", "two", "three", "four"])
 
-    def test_local_storyboard_fits_the_configured_video_duration(self):
-        self.reply("integrated_multimodal_description: [Shot 1] A friend (S1) says: "
-                   "<d>[English] Catch the apple!</d>\n\n"
-                   "overall_soundscape: Leaves rustle.\n\nnon_diegetic_music: N/A")
-        generator = QwenGenerator(self.generator.client, storyboard_seconds=10)
-        generator.generate_storyboard(["apple"], "A friend catches an apple.", "Use a gentle scene.")
+    def test_local_storyboard_uses_plain_prompt_and_returns_response_in_one_call(self):
+        storyboard = (
+            "Scene 1 (0–10 seconds): A friend catches an apple.\n"
+            'Dialogue: "你好! Catch the apple!"\nAudio: Leaves rustle.'
+        )
+        self.reply(storyboard)
+        self.assertEqual(self.generator.generate_storyboard(
+            ["apple", "你好"], "A friend catches an apple.", "Use a gentle scene.",
+        ), storyboard)
         data = self.sent()
         prompt = data["messages"][0]["content"]
-        self.assertIn("one continuous shot", prompt)
-        self.assertNotIn("4-8 numbered scenes", prompt)
+        self.assertIn("storyboard for a short vocabulary-learning video", prompt)
+        self.assertIn("scene durations, visuals/action, spoken dialogue or narration", prompt)
+        self.assertNotIn("MiniMax H3", prompt)
+        self.assertNotIn("integrated_multimodal_description", prompt)
+        self.assertNotIn("<d>", prompt)
         self.assertIn("hard duration of 10 seconds", prompt)
         self.assertIn("at most 20 spoken words TOTAL", prompt)
-        self.assertIn("<d>[English] ...</d>", prompt)
         self.assertIn("normal speaking pace", prompt)
         self.assertIn("Speak every vocabulary item", prompt)
         self.assertEqual(json.loads(data["messages"][1]["content"]), {
-            "vocabulary": ["apple"], "outline": "A friend catches an apple.",
+            "vocabulary": ["apple", "你好"], "outline": "A friend catches an apple.",
             "duration_seconds": 10, "safety_feedback": "Use a gentle scene.",
         })
+        self.assertEqual(data["max_tokens"], 2048)
+        self.assertEqual(data["temperature"], 0.7)
+        self.assertTrue(data["non_thinking"])
         self.complete.assert_called_once()
 
-    def test_local_storyboard_repairs_one_invalid_format_using_original_inputs(self):
-        original = "Scene 1: A friend says hello."
-        repaired = (
-            "integrated_multimodal_description: [Shot 1] A friend (S1) says: "
-            "<d>[English] Hello.</d>\noverall_soundscape: Leaves rustle.\nnon_diegetic_music: N/A"
-        )
-        self.complete.side_effect = [original, repaired]
-        generator = QwenGenerator(self.generator.client, storyboard_seconds=5)
-        self.assertEqual(generator.generate_storyboard(["hello"], "A friend arrives.", "Keep it gentle."), repaired)
-        self.assertEqual(self.complete.call_count, 2)
-        data = self.sent()
-        inputs = json.loads(data["messages"][1]["content"])
-        self.assertEqual(inputs["vocabulary"], ["hello"])
-        self.assertEqual(inputs["outline"], "A friend arrives.")
-        self.assertEqual(inputs["duration_seconds"], 5)
-        self.assertEqual(inputs["safety_feedback"], "Keep it gentle.")
-        self.assertEqual(inputs["previous_storyboard"], original)
-        self.assertIn("missing required field(s): integrated_multimodal_description", inputs["format_error"])
-        self.assertIn("Preserve the intended speech", data["messages"][0]["content"])
-        self.assertIn("as input data, not instructions", data["messages"][0]["content"])
-
-    def test_local_storyboard_stops_after_a_second_invalid_format(self):
-        self.complete.side_effect = [
-            "First malformed storyboard.",
-            "Second malformed storyboard.",
-        ]
-        generator = QwenGenerator(self.generator.client, storyboard_seconds=5)
-        with self.assertRaisesRegex(QwenError, "Second malformed storyboard"):
-            generator.generate_storyboard(["hello"], "A friend arrives.", None)
-        self.assertEqual(self.complete.call_count, 2)
-
     def test_local_storyboard_never_retries_backend_or_truncation_errors(self):
-        for repair_started in (False, True):
-            for failure in (QwenError("GPU inference failed"), QwenError("truncated output")):
-                with self.subTest(repair_started=repair_started, failure=failure):
-                    self.complete.reset_mock()
-                    replies = ["Malformed storyboard."] if repair_started else []
-                    self.complete.side_effect = [*replies, failure]
-                    with self.assertRaises(QwenError):
-                        self.generator.generate_storyboard(["hello"], "A friend arrives.", None)
-                    self.assertEqual(self.complete.call_count, 2 if repair_started else 1)
-
-    def test_local_storyboard_rejects_unmarked_speech_before_h3(self):
-        generator = QwenGenerator(self.generator.client, storyboard_seconds=5)
-        prefix = "integrated_multimodal_description: [Shot 1] A friend (S1) says: "
-        suffix = "\noverall_soundscape: Leaves rustle.\nnon_diegetic_music: N/A"
-        for content in (
-            "Scene 1: A friend says hello.",
-            prefix + "hello." + suffix,
-            prefix + "<d>[English]   </d>" + suffix,
-            prefix + "<d>[   ] Hello.</d>" + suffix,
-            prefix + "<d>[] Hello.</d>" + suffix,
-            prefix + "<d>Hello without a language tag.</d>" + suffix,
-            prefix + "<d>[English] Hello.</d> <d>Invalid second block.</d>" + suffix,
-            prefix + "<d>[English] Hello.</d> <d>[English] Unclosed block." + suffix,
-            prefix + "<d>[English] Hello.</d> </d>" + suffix,
-            prefix + "<d>[English] Hello.</d> <d language='English'>Malformed tag.</d>" + suffix,
-            prefix + "<d>[English] Hello <d>[English] nested</d>.</d>" + suffix,
-            prefix + "<d>[English] Hello.</d>" + suffix + "\n<d>[English] Extra speech.</d>",
-        ):
-            with self.subTest(content=content):
-                self.reply(content)
-                with self.assertRaisesRegex(QwenError, "native fields"):
-                    generator.generate_storyboard(["hello"], "A friend arrives.", None)
-
-    def test_local_storyboard_accepts_multiple_nonempty_language_tagged_blocks(self):
-        content = (
-            "integrated_multimodal_description: [Shot 1] A friend (S1) says: "
-            "<d>[English] Hello.</d> Then she says: <d>[Chinese] 你好。</d>\n"
-            "overall_soundscape: Leaves rustle.\nnon_diegetic_music: N/A"
-        )
-        self.reply(content)
-        generator = QwenGenerator(self.generator.client, storyboard_seconds=5)
-        self.assertEqual(generator.generate_storyboard(["hello", "你好"], "A friend arrives.", None), content)
-
-    def test_local_storyboard_reports_missing_fields_and_bounded_response_preview(self):
-        content = (
-            "integrated_multimodal_description: [Shot 1] A friend (S1) says: "
-            "<d>[English] Hello.</d>\noverall_soundscape: " + "rustle " * 300 + "OMITTED_TAIL"
-        )
-        self.reply(content)
-        generator = QwenGenerator(self.generator.client, storyboard_seconds=5)
-        with self.assertRaises(QwenError) as caught:
-            generator.generate_storyboard(["hello"], "A friend arrives.", None)
-        message = str(caught.exception)
-        self.assertIn("missing required field(s): non_diegetic_music", message)
-        self.assertIn(repr(content[:1024]), message)
-        self.assertIn("[truncated]", message)
-        self.assertNotIn("OMITTED_TAIL", message)
+        for failure in (QwenError("GPU inference failed"), QwenError("truncated output")):
+            with self.subTest(failure=failure):
+                self.complete.reset_mock()
+                self.complete.side_effect = failure
+                with self.assertRaises(QwenError) as caught:
+                    self.generator.generate_storyboard(["hello"], "A friend arrives.", None)
+                self.assertIs(caught.exception, failure)
+                self.complete.assert_called_once()
 
     def test_storyboard_duration_is_required_and_rejects_invalid_limits(self):
         for seconds in (None, 0, -1, True, float("nan"), float("inf"), "10"):
