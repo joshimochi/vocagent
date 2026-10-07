@@ -50,19 +50,15 @@ class QwenGenerator(LLMGenerator):
 
     def generate_outline(self, vocabulary: Sequence[str], feedback: str | None) -> str:
         prompt = outline_prompt(self.storyboard_seconds)
-        inputs = {
-            "target_word": normalize_target_word(vocabulary), "language": "English",
-            "duration_seconds": self.storyboard_seconds,
-        }
+        inputs = {"target_word": normalize_target_word(vocabulary)}
         return self._generate(prompt, inputs, feedback, 1024)
 
     def generate_storyboard(
         self, vocabulary: Sequence[str], outline: str, feedback: str | None,
     ) -> str:
         inputs = {
-            "target_word": normalize_target_word(vocabulary), "language": "English",
+            "target_word": normalize_target_word(vocabulary),
             "outline": outline,
-            "duration_seconds": self.storyboard_seconds,
         }
         prompt = storyboard_prompt(self.storyboard_seconds)
         return self._generate(prompt, inputs, feedback, 2048)
@@ -163,7 +159,7 @@ class QwenQuality(TextQualityAgent):
         content = self.client.complete(
             [{"role": "system", "content": QUALITY_PROMPT},
              {"role": "user", "content": json.dumps({
-                 "stage": stage, "target_word": target_word, "language": "English",
+                 "stage": stage, "target_word": target_word,
                  "candidates": [{"index": index, "text": text}
                                 for index, text in enumerate(candidates)],
              }, ensure_ascii=False)}],
@@ -226,7 +222,7 @@ class QwenVideoQuality(VideoQualityModel):
         self.validate_candidate_count(len(candidates))
         content: list[dict[str, object]] = [
             {"type": "text", "text": json.dumps({
-                "storyboard": storyboard, "language": "English",
+                "storyboard": storyboard,
             }, ensure_ascii=False)}
         ]
         for index, path in enumerate(candidates):

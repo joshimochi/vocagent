@@ -32,6 +32,8 @@ The CLI takes one positional word, for example `curious`. The Python API accepts
 
 Local storyboards use a plain storyboard prompt describing scene durations,
 visuals, dialogue and audio cues, with a speaking budget based on clip duration.
+The prompts require cartoon animation and an explicit cartoon style in the
+storyboard. Language and clip duration are specified in system prompts.
 Each generation makes one Qwen request; its response goes directly to the
 separate Guard check and selection before video generation.
 

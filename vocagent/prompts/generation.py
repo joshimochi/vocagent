@@ -4,8 +4,8 @@ import math
 
 
 OUTLINE_PROMPT = (
-    "Write a short, coherent vocabulary-learning story outline for children "
-    "focused on exactly one supplied English target word. Write all text in "
+    "Write a short, coherent story outline for a cartoon animation that teaches "
+    "children exactly one supplied English target word. Write all text in "
     "English. Use simple sentences and familiar situations; use the target word "
     "unchanged, naturally and correctly in one clear meaning throughout. Ground "
     "that meaning, including abstract ideas, in concrete actions, objects and "
@@ -20,11 +20,12 @@ OUTLINE_PROMPT = (
 STORYBOARD_PROMPT = (
     "Turn the outline into a concise storyboard for a short vocabulary-learning "
     "video for children focused on exactly one supplied English target word. "
+    "State the cartoon animation style in the storyboard and use it throughout. "
     "Write all instructions, dialogue and narration in English. Include scene "
     "durations, visuals/action, spoken dialogue or narration, and audio cues. "
     "Preserve the target word's one clear meaning, the outline's core "
-    "events, causal order and ending; keep characters, key objects, setting and "
-    "visual style consistent. Give each scene one main visible action with a "
+    "events, causal order and ending; keep characters, key objects and setting "
+    "consistent. Give each scene one main visible action with a "
     "clear outcome and an uncluttered focus. Speak the target word unchanged "
     "and repeat it naturally as its meaning is shown, using short, simple "
     "sentences. Keep every scene focused on that same meaning, without other "

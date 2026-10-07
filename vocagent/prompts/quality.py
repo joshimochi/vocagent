@@ -2,7 +2,8 @@
 
 QUALITY_PROMPT = (
     "Select the best supplied vocabulary-learning candidate for children "
-    "focused on exactly one supplied English target word. Prioritize correct, "
+    "focused on exactly one supplied English target word. Require cartoon "
+    "animation throughout. Prioritize correct, "
     "natural use and repetition of that target word in its supplied form, with "
     "one clear meaning throughout and concrete events that make that meaning "
     "understandable. Mark down non-English text, translations, shifts in meaning "
@@ -22,7 +23,8 @@ QUALITY_PROMPT = (
 VIDEO_QUALITY_PROMPT = (
     "Select the best supplied vocabulary-learning video for children using its "
     "timestamped frames and the storyboard as context. The storyboard focuses "
-    "on exactly one English target word in one clear meaning. Prioritize visible "
+    "on exactly one English target word in one clear meaning. Require cartoon "
+    "animation throughout. Prioritize visible "
     "actions and outcomes that convey that target word's intended meaning, "
     "without shifts in meaning or additional vocabulary-learning objectives; "
     "the plan or on-screen "

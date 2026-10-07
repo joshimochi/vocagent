@@ -40,9 +40,11 @@ bash deploy/run_hs.sh curious \
 Each run accepts exactly one English target word. Multiple words and phrases are rejected.
 The input permits ASCII letters with internal apostrophes or hyphens, such as
 `don't` or `well-known`; it is treated as English without a dictionary lookup.
-Generation and selection prompts require English text and spoken dialogue, with
-the outline, storyboard, and video focused on one clear meaning of the target word.
-Speech recognition also defaults to English.
+Generation and selection prompts require cartoon animation, English text and
+spoken dialogue, with the outline, storyboard, and video focused on one clear
+meaning of the target word. The storyboard explicitly states the cartoon style.
+Language and clip duration are specified in system prompts. Speech recognition
+also defaults to English.
 
 The CLI defaults to a complete subtitled video. `--stop-after storyboard`
 stops after the selected text artifacts. The output directory must be new or

@@ -31,7 +31,7 @@ class QwenTests(unittest.TestCase):
         call = self.complete.call_args
         return {"messages": call.args[0], **call.kwargs}
 
-    def test_outline_carries_one_english_target_feedback_duration_and_no_thinking(self):
+    def test_outline_keeps_constraints_in_system_and_target_feedback_in_user_message(self):
         self.reply("The story outline")
         self.assertEqual(
             self.generator.generate_outline([" apple "], "Remove violence."),
@@ -41,10 +41,11 @@ class QwenTests(unittest.TestCase):
         self.assertTrue(data["non_thinking"])
         self.assertGreater(data["temperature"], 0)
         self.assertEqual(json.loads(data["messages"][1]["content"]), {
-            "target_word": "apple", "language": "English", "duration_seconds": 10,
+            "target_word": "apple",
             "safety_feedback": "Remove violence.",
         })
         self.assertIn("safety feedback", data["messages"][0]["content"])
+        self.assertIn("cartoon animation", data["messages"][0]["content"])
         self.assertIn("10-second video", data["messages"][0]["content"])
         self.assertIn("exactly one supplied English target word", data["messages"][0]["content"])
         self.assertIn("one clear meaning throughout", data["messages"][0]["content"])
@@ -76,6 +77,7 @@ class QwenTests(unittest.TestCase):
         data = self.sent()
         prompt = data["messages"][0]["content"]
         self.assertIn("storyboard for a short vocabulary-learning video", prompt)
+        self.assertIn("State the cartoon animation style in the storyboard", prompt)
         self.assertIn("scene durations, visuals/action, spoken dialogue or narration", prompt)
         self.assertNotIn("MiniMax H3", prompt)
         self.assertNotIn("integrated_multimodal_description", prompt)
@@ -89,8 +91,8 @@ class QwenTests(unittest.TestCase):
         self.assertIn("Write all instructions, dialogue and narration in English", prompt)
         self.assertNotIn("other languages", prompt)
         self.assertEqual(json.loads(data["messages"][1]["content"]), {
-            "target_word": "apple", "language": "English", "outline": "A friend catches an apple.",
-            "duration_seconds": 10, "safety_feedback": "Use a gentle scene.",
+            "target_word": "apple", "outline": "A friend catches an apple.",
+            "safety_feedback": "Use a gentle scene.",
         })
         self.assertEqual(data["max_tokens"], 2048)
         self.assertEqual(data["temperature"], 0.7)
@@ -167,10 +169,11 @@ class QwenTests(unittest.TestCase):
         data = self.sent()
         self.assertTrue(data["non_thinking"])
         self.assertEqual(json.loads(data["messages"][1]["content"]), {
-            "stage": "storyboard", "target_word": "apple", "language": "English",
+            "stage": "storyboard", "target_word": "apple",
             "candidates": [{"index": 0, "text": "first"}, {"index": 1, "text": "second"}],
         })
         prompt = data["messages"][0]["content"]
+        self.assertIn("cartoon animation", prompt)
         self.assertIn("exactly one supplied English target word", prompt)
         self.assertIn("one clear meaning throughout", prompt)
         self.assertIn("non-English text", prompt)
@@ -262,8 +265,9 @@ class QwenTests(unittest.TestCase):
         self.assertTrue(data["non_thinking"])
         content = data["messages"][1]["content"]
         self.assertEqual(json.loads(content[0]["text"]), {
-            "storyboard": "A clear storyboard.", "language": "English",
+            "storyboard": "A clear storyboard.",
         })
+        self.assertIn("cartoon animation", data["messages"][0]["content"])
         self.assertIn("exactly one English target word", data["messages"][0]["content"])
         images = [block["image"] for block in content if block["type"] == "image"]
         self.assertEqual(images, [frame.jpeg for group in frames for frame in group])
