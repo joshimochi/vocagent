@@ -59,6 +59,13 @@ For LLM-generated texts, a separate safety agent checks the result. An unsafe
 result's failure reason is passed to the next generation attempt in the same
 slot. A separate quality agent chooses the best safe result.
 
+Save each accepted outline and storyboard as UTF-8 text before quality selection
+in `outline_candidates/` and `storyboard_candidates/`, respectively. Files are named
+`candidate-N-attempt-M.txt`, using one-based slot and attempt numbers. Retain all
+accepted alternatives, and write the selected texts to `outline.txt` and
+`storyboard.txt`. These candidate files are also kept when stopping after the
+storyboard or when a later provider or quality-selection call fails.
+
 Each video attempt writes sibling `candidate-N-attempt-N.mp4`, `.wav`, and `.json`
 files under `video_candidates/`. Both safety checks run after successful
 transcription and validation; the audio safety model receives transcript text,

@@ -83,6 +83,12 @@ class Workflow:
                 raise ValueError("Text generators must return nonempty strings.")
             return text
 
+        def save_text_candidate(directory: Path, slot: int, attempt: int, text: str) -> None:
+            path = directory / f"candidate-{slot}-attempt-{attempt}.txt"
+            path.write_text(text, encoding="utf-8")
+
+        outline_candidates_dir = output / "outline_candidates"
+        outline_candidates_dir.mkdir()
         outline = select_candidate(
             stage="outline",
             candidate_count=self.outline_candidate_count,
@@ -95,10 +101,15 @@ class Workflow:
             ),
             pass_feedback=True,
             concurrent_candidates=self.concurrent_candidates,
+            on_accept=lambda slot, attempt, text: save_text_candidate(
+                outline_candidates_dir, slot, attempt, text
+            ),
         )
         outline_path = output / "outline.txt"
         outline_path.write_text(outline, encoding="utf-8")
 
+        storyboard_candidates_dir = output / "storyboard_candidates"
+        storyboard_candidates_dir.mkdir()
         storyboard = select_candidate(
             stage="storyboard",
             candidate_count=self.storyboard_candidate_count,
@@ -111,6 +122,9 @@ class Workflow:
             ),
             pass_feedback=True,
             concurrent_candidates=self.concurrent_candidates,
+            on_accept=lambda slot, attempt, text: save_text_candidate(
+                storyboard_candidates_dir, slot, attempt, text
+            ),
         )
         storyboard_path = output / "storyboard.txt"
         storyboard_path.write_text(storyboard, encoding="utf-8")

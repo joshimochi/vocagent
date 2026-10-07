@@ -140,6 +140,14 @@ class PipelineTests(unittest.TestCase):
         )
         self.assertEqual(result.outline.read_text(), chosen_outline)
         self.assertEqual(result.storyboard.read_text(), chosen_storyboard)
+        for stage, candidates in (("outline", outlines), ("storyboard", storyboards)):
+            self.assertEqual({
+                path.name: path.read_text(encoding="utf-8")
+                for path in (self.output / f"{stage}_candidates").iterdir()
+            }, {
+                f"candidate-{slot}-attempt-1.txt": text
+                for slot, text in enumerate(candidates, start=1)
+            })
         self.assertEqual(json.loads((self.output / "vocabulary.json").read_text()), list(words))
         self.assertEqual(json.loads(result.transcript.read_text()), [
             {"start": 0.25, "end": 1.5, "text": "Hello, apple."},
@@ -184,7 +192,22 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(json.loads((self.output / "vocabulary.json").read_text()),
                          ["apple", "pear"])
         self.assertEqual({path.name for path in self.output.iterdir()},
-                         {"vocabulary.json", "outline.txt", "storyboard.txt"})
+                         {"vocabulary.json", "outline.txt", "storyboard.txt",
+                          "outline_candidates", "storyboard_candidates"})
+        self.assertEqual({
+            path.name: path.read_text(encoding="utf-8")
+            for path in (self.output / "outline_candidates").iterdir()
+        }, {
+            "candidate-1-attempt-1.txt": "outline 1",
+            "candidate-2-attempt-1.txt": "outline 2",
+        })
+        self.assertEqual({
+            path.name: path.read_text(encoding="utf-8")
+            for path in (self.output / "storyboard_candidates").iterdir()
+        }, {
+            "candidate-1-attempt-2.txt": "storyboard 2",
+            "candidate-2-attempt-1.txt": "storyboard 3",
+        })
         self.assertEqual(self.text_quality.choose.call_count, 2)
         self.assertEqual(self.llm.generate_storyboard.call_args_list, [
             call(("apple", "pear"), "outline 2", None),
@@ -322,6 +345,16 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(len(storyboard_call.args[2]), 3)
         self.assertEqual(result.outline.read_text(), outline_call.args[2][-1])
         self.assertEqual(result.storyboard.read_text(), storyboard_call.args[2][-1])
+        for stage, candidates in (
+            ("outline", outline_call.args[2]), ("storyboard", storyboard_call.args[2]),
+        ):
+            self.assertEqual({
+                path.name: path.read_text(encoding="utf-8")
+                for path in (self.output / f"{stage}_candidates").iterdir()
+            }, {
+                f"candidate-{slot}-attempt-1.txt": text
+                for slot, text in enumerate(candidates, start=1)
+            })
         videos = self.video_quality.choose.call_args.args[1]
         self.assertEqual(
             [video.name for video in videos],
@@ -358,10 +391,74 @@ class PipelineTests(unittest.TestCase):
         self.assertCountEqual(outlines, [f"outline {number}" for number in range(2, 4)])
         chosen_outline = outlines[1]
         self.assertEqual(result.outline.read_text(), chosen_outline)
+        self.assertEqual({
+            path.name: path.read_text(encoding="utf-8")
+            for path in (self.output / "outline_candidates").iterdir()
+        }, {
+            "candidate-1-attempt-2.txt": "outline 2",
+            "candidate-2-attempt-1.txt": "outline 3",
+        })
         self.assertEqual(
             self.llm.generate_storyboard.call_args_list,
             [call(("apple",), chosen_outline, None)] * 2,
         )
+
+    def test_accepted_outlines_are_saved_before_a_quality_provider_failure(self):
+        outlines = ("An apple in 苹果 orchard.", "A pear beside 梨 trees.")
+        self.llm.generate_outline.side_effect = outlines
+        failure = RuntimeError("quality provider unavailable")
+
+        def choose(stage, vocabulary, candidates):
+            self.assertEqual(stage, "outline")
+            self.assertEqual(tuple(candidates), outlines)
+            self.assertEqual({
+                path.name: path.read_text(encoding="utf-8")
+                for path in (self.output / "outline_candidates").iterdir()
+            }, {
+                f"candidate-{slot}-attempt-1.txt": text
+                for slot, text in enumerate(outlines, start=1)
+            })
+            raise failure
+
+        self.text_quality.choose.side_effect = choose
+        with self.assertRaises(RuntimeError) as raised:
+            self.workflow.run(["apple"], self.output, stop_after="storyboard")
+
+        self.assertIs(raised.exception, failure)
+        self.assertEqual({
+            path.name: path.read_text(encoding="utf-8")
+            for path in (self.output / "outline_candidates").iterdir()
+        }, {
+            f"candidate-{slot}-attempt-1.txt": text
+            for slot, text in enumerate(outlines, start=1)
+        })
+        self.assertFalse((self.output / "outline.txt").exists())
+        self.llm.generate_storyboard.assert_not_called()
+
+    def test_accepted_texts_survive_a_later_storyboard_provider_failure(self):
+        failure = RuntimeError("storyboard provider unavailable")
+        self.llm.generate_storyboard.side_effect = ["Accepted storyboard 苹果.", failure]
+
+        with self.assertRaises(RuntimeError) as raised:
+            self.workflow.run(["apple"], self.output, stop_after="storyboard")
+
+        self.assertIs(raised.exception, failure)
+        self.assertEqual({
+            path.name: path.read_text(encoding="utf-8")
+            for path in (self.output / "outline_candidates").iterdir()
+        }, {
+            "candidate-1-attempt-1.txt": "outline 1",
+            "candidate-2-attempt-1.txt": "outline 2",
+        })
+        self.assertEqual((self.output / "outline.txt").read_text(), "outline 2")
+        self.assertEqual({
+            path.name: path.read_text(encoding="utf-8")
+            for path in (self.output / "storyboard_candidates").iterdir()
+        }, {"candidate-1-attempt-1.txt": "Accepted storyboard 苹果."})
+        self.assertFalse((self.output / "storyboard.txt").exists())
+        self.assertEqual(self.llm.generate_storyboard.call_count, 2)
+        self.text_quality.choose.assert_called_once()
+        self.video.generate.assert_not_called()
 
     def test_unsafe_video_is_deleted_before_regeneration_without_feedback(self):
         rejected = self.output / "video_candidates" / "candidate-1-attempt-1.mp4"

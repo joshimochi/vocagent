@@ -71,7 +71,16 @@ class CLITests(unittest.TestCase):
             self.assertEqual((output / "storyboard.txt").read_text(), storyboard)
             self.assertEqual({path.name for path in output.iterdir()}, {
                 "vocabulary.json", "outline.txt", "storyboard.txt",
+                "outline_candidates", "storyboard_candidates",
             })
+            for stage, text in (("outline", "A story about an apple."),
+                                ("storyboard", storyboard)):
+                self.assertEqual({
+                    path.name: path.read_text(encoding="utf-8")
+                    for path in (output / f"{stage}_candidates").iterdir()
+                }, {
+                    f"candidate-{slot}-attempt-1.txt": text for slot in (1, 2)
+                })
 
     def test_default_local_factory_runs_full_video_and_releases_gpu_runtime(self):
         providers = providers_for_test()

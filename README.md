@@ -157,10 +157,16 @@ keys, or SSH tunnels.
 
 ## Outputs and tests
 
-Outputs include `vocabulary.json`, `outline.txt`, `storyboard.txt`, safe video
-candidates and sidecars in `video_candidates/`, the selected `audio.wav` and
-`transcript.json`, `subtitles.ass`, and `final.mp4`. Earlier artifacts remain
-available after a provider failure.
+Outputs include `vocabulary.json`, the selected `outline.txt` and `storyboard.txt`,
+all accepted text candidates in `outline_candidates/` and `storyboard_candidates/`,
+safe video candidates and sidecars in `video_candidates/`, the selected
+`audio.wav` and `transcript.json`, `subtitles.ass`, and `final.mp4`.
+Text candidates are UTF-8 files named `candidate-N-attempt-M.txt`, with one-based
+candidate slot and attempt numbers. They are saved after passing safety and before
+quality selection, including accepted alternatives that were not selected.
+`--stop-after storyboard` also retains both text candidate directories. Earlier
+artifacts, including accepted text candidates, remain available after a provider
+or quality-selection failure.
 
 ```sh
 python3 -m unittest discover -s tests -v

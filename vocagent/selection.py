@@ -42,6 +42,7 @@ def select_candidate(
     candidate_count: int = 2,
     concurrent_candidates: bool = False,
     check_content: Callable[[T], str | None] | None = None,
+    on_accept: Callable[[int, int, T], None] | None = None,
 ) -> T:
     """Choose among configurable slots with up to four attempts each.
 
@@ -53,6 +54,8 @@ def select_candidate(
     Optional check_content runs only after safety passes and returns None to
     accept or a nonempty rejection reason. Content and safety rejections share
     the same four-attempt budget; provider errors still stop the workflow.
+    Optional on_accept receives the one-based slot, attempt, and accepted
+    candidate before quality judging, and may run concurrently across slots.
     Each slot's retries remain sequential. Provider exceptions stop new attempts
     and propagate after in-flight work finishes, without becoming safety failures.
     """
@@ -72,6 +75,8 @@ def select_candidate(
                     log.info("%s slot %d attempt %d passed safety", stage, slot, attempt)
                     reason = check_content(candidate) if check_content is not None else None
                     if reason is None:
+                        if on_accept is not None:
+                            on_accept(slot, attempt, candidate)
                         return [candidate]
                     if not isinstance(reason, str) or not reason.strip():
                         raise ValueError(
