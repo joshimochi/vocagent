@@ -162,13 +162,3 @@ Each candidate’s sampled images follow these text labels, with the fields fill
 Candidate {index}: {frame_count} frames.
 Candidate {index}, time {timestamp:.3f} seconds:
 ```
-
-## Text generation retry
-
-When retrying with safety feedback, the system prompt has this sentence appended:
-
-```text
-Revise to resolve the safety feedback.
-```
-
-The user message also includes `"safety_feedback": "<feedback from the safety check>"`.
