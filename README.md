@@ -18,8 +18,8 @@ text and duration-specific builders there.
 | Visual safety | google/shieldgemma-2-4b-it, BF16 |
 
 **Final content validation is in progress.** The complete technical pipeline and
-native-resolution H3 capacity checks passed on `hs`. A new full run is
-verifying spoken vocabulary with H3's native dialogue format. See [deployment status](deploy/README.md)
+native-resolution H3 capacity checks passed on `hs`. The latest full validation run
+uses an earlier prompt with H3's native dialogue format. See [deployment status](deploy/README.md)
 for the exact completed checks and remaining work.
 
 ## Run on hs
@@ -72,8 +72,8 @@ working GPU-only 4-bit route. The other Qwen checkpoints are their largest
 released family sizes; ShieldGemma 2 provides a 4B checkpoint. H3 uses the full
 released encoder and diffusion weights in BF16 and its decoders in FP32 (video decoding uses FP16 autocast on MUSA).
 Full H3 GPU residency and low-resolution native audio/video generation passed on hs.
-Normal-resolution memory capacity also passed. The corrected full run verifies
-spoken vocabulary using the native H3 prompt format.
+Normal-resolution memory capacity also passed. The latest full validation run uses
+the earlier native H3 prompt format to verify spoken vocabulary.
 
 Separate stateless text generation and selection agents share the same VL
 weights. Qwen3-VL uses uncached SDPA on MUSA because cached decoding failed
@@ -85,9 +85,9 @@ threads can preprocess in parallel, but model inference remains serialized.
 ## Workflow and safety behavior
 
 1. Generate outlines; check each with Qwen3Guard; select the best safe outline.
-2. Generate H3-native storyboards with speaker IDs, language-tagged dialogue and
-   a speaking budget matched to the clip duration. Permit one format repair;
-   check the final prompt with Guard and select the best safe storyboard.
+2. Generate storyboards with scene durations, visuals, dialogue and audio cues,
+   using a speaking budget matched to the clip duration. Check each with Guard
+   and select the best safe storyboard.
 3. Generate a video with native audio. Extract mono 16 kHz PCM audio with FFmpeg.
 4. Run Qwen3-ASR plus forced alignment. Preserve the recognized text and its
    aligned timestamps in the saved transcript and subtitle cues.

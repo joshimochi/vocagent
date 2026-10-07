@@ -12,7 +12,7 @@ import re
 from typing import Protocol, Sequence
 
 from .models import SafetyResult
-from .prompts.generation import H3_REPAIR_PROMPT, outline_prompt, storyboard_prompt
+from .prompts.generation import outline_prompt, storyboard_prompt
 from .prompts.quality import (
     QUALITY_PROMPT, VIDEO_CANDIDATE_TEMPLATE, VIDEO_FRAME_TEMPLATE, VIDEO_QUALITY_PROMPT,
 )
@@ -35,50 +35,6 @@ class ChatClient(Protocol):
         self, messages: Sequence[dict[str, object]], *, max_tokens: int,
         temperature: float, non_thinking: bool = False,
     ) -> str: ...
-
-
-def _validate_h3_storyboard(result: str) -> None:
-    """Reject malformed native prompts before expensive video inference."""
-    def invalid(reason: str) -> None:
-        preview = result[:1024]
-        suffix = " [truncated]" if len(result) > 1024 else ""
-        raise QwenError(
-            "H3 storyboard must use its native fields, speaker ID and tagged speech; "
-            f"{reason}. Response preview: {preview!r}{suffix}"
-        )
-
-    required_fields = (
-        "integrated_multimodal_description", "overall_soundscape", "non_diegetic_music",
-    )
-    missing = [name for name in required_fields if f"{name}:" not in result]
-    if missing:
-        invalid(f"missing required field(s): {', '.join(missing)}")
-    fields = re.fullmatch(
-        r"integrated_multimodal_description:\s*(.+?)\s*"
-        r"overall_soundscape:\s*(.+?)\s*non_diegetic_music:\s*(.+)",
-        result, re.DOTALL,
-    )
-    if fields is None:
-        invalid("required fields must appear in order with nonempty contents")
-    for name, content in zip(required_fields, fields.groups()):
-        if not content.strip():
-            invalid(f"required field {name} is empty")
-    description = fields[1]
-    if any(re.search(r"</?d\b", content, re.IGNORECASE) for content in fields.groups()[1:]):
-        invalid("all dialogue must be inside integrated_multimodal_description")
-    for marker in ("[Shot 1]", "(S1)"):
-        if marker not in description:
-            invalid(f"integrated_multimodal_description is missing {marker}")
-    dialogue = list(re.finditer(r"<d>(.*?)</d>", description, re.DOTALL))
-    if not dialogue:
-        invalid("integrated_multimodal_description is missing tagged speech")
-    for index, block in enumerate(dialogue, 1):
-        speech = re.fullmatch(r"\s*\[([^]\r\n]+)\]\s*([^<>]+)", block[1], re.DOTALL)
-        if speech is None or not speech[1].strip() or not speech[2].strip():
-            invalid(f"dialogue block {index} must contain a nonempty language tag and speech")
-    outside_dialogue = re.sub(r"<d>.*?</d>", "", description, flags=re.DOTALL)
-    if re.search(r"</?d\b", outside_dialogue, re.IGNORECASE):
-        invalid("integrated_multimodal_description contains an unmatched or malformed dialogue tag")
 
 
 class QwenGenerator(LLMGenerator):
@@ -104,20 +60,7 @@ class QwenGenerator(LLMGenerator):
             "duration_seconds": self.storyboard_seconds,
         }
         prompt = storyboard_prompt(self.storyboard_seconds)
-        result = self._generate(prompt, inputs, feedback, 2048)
-        # Missing speech tags caused H3 to improvise unrelated dialogue in a
-        # real run. Permit one format repair, then reject any unusable prompt
-        # before expensive video inference. Backend errors are never retried.
-        try:
-            _validate_h3_storyboard(result)
-        except QwenError as exc:
-            repair_inputs = {
-                **inputs, "previous_storyboard": result, "format_error": str(exc),
-            }
-            repair_prompt = prompt + H3_REPAIR_PROMPT
-            result = self._generate(repair_prompt, repair_inputs, feedback, 2048)
-            _validate_h3_storyboard(result)
-        return result
+        return self._generate(prompt, inputs, feedback, 2048)
 
     def _generate(self, prompt: str, inputs: dict, feedback: str | None, max_tokens: int) -> str:
         if feedback:

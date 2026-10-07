@@ -49,9 +49,8 @@ class CLITests(unittest.TestCase):
         llm = Mock(spec=LLMGenerator)
         llm.generate_outline.return_value = "A story about an apple."
         storyboard = (
-            "integrated_multimodal_description: [Shot 1] A friend (S1) catches an apple "
-            "and says <d>[English] Apple!</d>\n"
-            "overall_soundscape: Leaves rustle.\nnon_diegetic_music: N/A"
+            'Scene 1 (0–10 seconds): A friend catches an apple and says "Apple!"\n'
+            "Audio: Leaves rustle."
         )
         llm.generate_storyboard.return_value = storyboard
         safety = Mock(spec=TextSafetyAgent)

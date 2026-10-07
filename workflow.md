@@ -23,10 +23,10 @@ Qwen3-ASR-1.7B plus ForcedAligner-0.6B for timestamped speech; and ShieldGemma2
 video workflow. `--stop-after storyboard` or `stop_after="storyboard"` stops after
 selected text artifacts. Provider factories supply every workflow stage.
 
-Local storyboards use H3's native fields, speaker IDs and language-tagged
-dialogue, with a speaking budget based on clip duration. A malformed native
-format gets at most one repair request to the same Qwen model. The final prompt
-must pass format validation before the separate Guard check and H3 generation.
+Local storyboards use a plain storyboard prompt describing scene durations,
+visuals, dialogue and audio cues, with a speaking budget based on clip duration.
+Each generation makes one Qwen request; its response goes directly to the
+separate Guard check and selection before video generation.
 
 The local runtime serializes GPU inference and evicts the previous model family
 before loading its replacement. It rejects CPU/disk offloading. H3 runs in a
