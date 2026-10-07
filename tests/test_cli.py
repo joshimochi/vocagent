@@ -2,6 +2,7 @@
 
 from contextlib import redirect_stderr, redirect_stdout
 import io
+import json
 from pathlib import Path
 import tempfile
 from types import ModuleType, SimpleNamespace
@@ -71,8 +72,11 @@ class CLITests(unittest.TestCase):
             self.assertEqual((output / "storyboard.txt").read_text(), storyboard)
             self.assertEqual({path.name for path in output.iterdir()}, {
                 "vocabulary.json", "outline.txt", "storyboard.txt",
-                "outline_candidates", "storyboard_candidates",
+                "outline_candidates", "storyboard_candidates", "benchmark.json",
             })
+            report = json.loads((output / "benchmark.json").read_text(encoding="utf-8"))
+            self.assertEqual(report["status"], "completed")
+            self.assertEqual(report["metadata"]["stop_after"], "storyboard")
             for stage, text in (("outline", "A story about an apple."),
                                 ("storyboard", storyboard)):
                 self.assertEqual({
@@ -140,11 +144,14 @@ class CLITests(unittest.TestCase):
             with patch("vocagent.__main__.load_providers", return_value=providers), \
                     redirect_stderr(stderr):
                 status = main(["apple", "--providers", "example:build", "--output-dir", temporary])
+            report = json.loads((Path(temporary) / "benchmark.json").read_text(encoding="utf-8"))
 
         self.assertEqual(status, 2)
         self.assertIn("Human intervention required:", stderr.getvalue())
         self.assertIn("outline", stderr.getvalue())
         self.assertEqual(llm.generate_outline.call_count, 8)
+        self.assertEqual(report["status"], "failed")
+        self.assertIn("human intervention", report["error"]["message"])
 
     def test_custom_provider_defaults_to_video_and_prints_final_path(self):
         providers = providers_for_test()

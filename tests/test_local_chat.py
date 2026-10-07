@@ -2,10 +2,13 @@
 
 from contextlib import contextmanager, nullcontext
 import json
+from pathlib import Path
+import tempfile
 from types import SimpleNamespace
 import unittest
 from unittest.mock import MagicMock, patch
 
+from vocagent.benchmark import Benchmark
 from vocagent.local_chat import LocalChatClient, MAX_IMAGE_BYTES, MAX_IMAGE_PIXELS, MAX_IMAGES
 from vocagent.qwen import QwenError
 
@@ -65,6 +68,51 @@ class LocalChatTests(unittest.TestCase):
         image.__enter__.return_value = image
         module = SimpleNamespace(Image=SimpleNamespace(open=MagicMock(return_value=image)))
         return module, image
+
+    def test_benchmark_counts_actual_tokens_and_times_generation_without_preparation_or_decode(self):
+        client, model, processor, inputs = self.setup_chat(length=5, tokens=[2, 3, 9])
+        clock = [0.0]
+
+        def prepare(*args, **kwargs):
+            clock[0] += 3
+            return inputs
+
+        def generate(**kwargs):
+            clock[0] += 7
+            return Generated([0] * 5 + [2, 3, 9])
+
+        def decode(*args, **kwargs):
+            clock[0] += 2
+            return "answer"
+
+        processor.apply_chat_template.side_effect = prepare
+        model.generate.side_effect = generate
+        processor.tokenizer.decode.side_effect = decode
+        with tempfile.TemporaryDirectory() as directory, patch(
+            "vocagent.benchmark.perf_counter", side_effect=lambda: clock[0],
+        ):
+            benchmark = Benchmark(Path(directory) / "benchmark.json")
+            with benchmark.step("chat"):
+                client.complete([{"role": "user", "content": "hello"}], max_tokens=7, temperature=0)
+            total = benchmark.finish()["total"]
+        self.assertEqual(total["model_run_seconds"], 7)
+        self.assertEqual(total["wall_seconds"], 12)
+        self.assertEqual(total["work"], {"input_tokens": 5, "generated_tokens": 3})
+
+    def test_failed_completion_retains_generated_token_and_image_work(self):
+        client, *_ = self.setup_chat(tokens=[7, 8], vision=True)
+        pil, _ = self.image_module()
+        with tempfile.TemporaryDirectory() as directory, patch.dict("sys.modules", {"PIL": pil}):
+            benchmark = Benchmark(Path(directory) / "benchmark.json")
+            with self.assertRaises(QwenError):
+                with benchmark.step("vision"):
+                    client.complete([{"role": "user", "content": [
+                        {"type": "image", "image": b"jpeg"}, {"type": "text", "text": "describe"},
+                    ]}], max_tokens=3, temperature=0)
+            report = benchmark.finish(error=QwenError("truncated"))
+        self.assertEqual(report["total"]["work"], {"input_tokens": 3, "generated_tokens": 2, "images": 1})
+        self.assertEqual(report["calls"][0]["status"], "failed")
+        self.assertEqual(report["total"]["model_run_count"], 1)
 
     def test_text_completion_uses_full_prompt_and_rejects_context_overflow_before_gpu_copy(self):
         client, model, processor, inputs = self.setup_chat(length=60, max_context=64)

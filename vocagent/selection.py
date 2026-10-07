@@ -32,6 +32,16 @@ def validate_safety_result(safety: SafetyResult, stage: str) -> SafetyResult:
     return safety
 
 
+def validate_selection_index(index: int, candidate_count: int, stage: str) -> int:
+    """Validate a quality decision at the provider boundary."""
+    if type(index) is not int or not 0 <= index < candidate_count:
+        raise ValueError(
+            f"{stage}: the quality judge must return an integer index from "
+            f"0 to {candidate_count - 1}; got {index!r}."
+        )
+    return index
+
+
 def select_candidate(
     *,
     stage: str,
@@ -112,10 +122,5 @@ def select_candidate(
             "each; human intervention is required."
         )
 
-    index = choose_best(tuple(accepted))
-    if type(index) is not int or not 0 <= index < len(accepted):
-        raise ValueError(
-            f"{stage}: the quality judge must return an integer index from "
-            f"0 to {len(accepted) - 1}; got {index!r}."
-        )
+    index = validate_selection_index(choose_best(tuple(accepted)), len(accepted), stage)
     return accepted[index]

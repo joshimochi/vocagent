@@ -25,6 +25,7 @@ class StoryboardResult:
 
     outline: Path
     storyboard: Path
+    benchmarks: Path | None = None
 
 
 @dataclass(frozen=True)
@@ -36,3 +37,4 @@ class WorkflowResult:
     transcript: Path
     subtitles: Path
     final_video: Path
+    benchmarks: Path | None = None

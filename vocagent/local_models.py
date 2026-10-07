@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any, Sequence
 import unicodedata
 
+from .benchmark import current_step, model_phase
 from .models import SafetyResult, TranscriptSegment
 from .providers import SpeechToText, VideoSafetyModel
 from .subtitles import validate_segments
@@ -174,9 +175,11 @@ class Qwen3SpeechToText(SpeechToText):
             raise LocalModelError("Speech audio is empty.")
         key = ("qwen3-speech", self.model, self.aligner_model)
         with self.runtime.use(key, self._load) as speech:
-            results = speech.transcribe(
-                audio=str(path), language=self.language, return_time_stamps=True,
-            )
+            with model_phase("run", self.runtime, model=self.model) as phase:
+                phase.add_work(audio_seconds=duration)
+                results = speech.transcribe(
+                    audio=str(path), language=self.language, return_time_stamps=True,
+                )
             if not isinstance(results, list) or len(results) != 1:
                 raise LocalModelError("Qwen3-ASR must return exactly one transcription.")
             result = results[0]
@@ -284,11 +287,26 @@ class ShieldGemma2VideoSafety(VideoSafetyModel):
                 try:
                     inputs = processor(
                         images=[picture], policies=list(SHIELD_POLICIES), return_tensors="pt",
-                    ).to(device=self.runtime.device, dtype=self.runtime.dtype)
+                    )
+                    input_tokens = None
+                    if current_step() is not None:
+                        # Count the CPU batch before copying it, so telemetry
+                        # adds no accelerator reduction or synchronization.
+                        mask = inputs.get("attention_mask")
+                        shape = getattr(inputs.get("input_ids"), "shape", None)
+                        if mask is not None:
+                            input_tokens = int(mask.sum().item())
+                        elif isinstance(shape, (tuple, list)) and shape:
+                            input_tokens = math.prod(shape)
+                    inputs = inputs.to(device=self.runtime.device, dtype=self.runtime.dtype)
                 finally:
                     picture.close()
-                with torch.inference_mode():
-                    outputs = model(**inputs)
+                with model_phase("run", self.runtime, model=self.model) as phase:
+                    phase.add_work(images=1, frames=1)
+                    if input_tokens is not None:
+                        phase.add_work(input_tokens=input_tokens)
+                    with torch.inference_mode():
+                        outputs = model(**inputs)
                 scores = outputs.probabilities.detach().float().cpu().tolist()
                 verdict = shield_verdict(scores, [frame.timestamp], threshold=self.threshold)
                 if not verdict.safe:

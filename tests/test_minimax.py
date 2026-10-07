@@ -1,18 +1,56 @@
 """H3 capacity policy, frame geometry and GPU-compatible convolution checks."""
 
 import importlib.util
+from contextlib import contextmanager, nullcontext
+from pathlib import Path
+import tempfile
 from types import SimpleNamespace
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import MagicMock, Mock, patch
 
+from vocagent.benchmark import Benchmark
 from vocagent.minimax import (
-    H3Settings, _dispatch_resident, _patch_pointwise_conv3d, _patch_audio_convolutions,
+    H3Settings, MiniMaxH3VideoGenerator, _dispatch_resident, _patch_pointwise_conv3d, _patch_audio_convolutions,
     _gpu_decode_boundary,
     _chunk_h3_feed_forwards,
 )
 
 
 class H3SettingsTests(unittest.TestCase):
+    def test_generation_benchmark_excludes_encoding_and_records_completed_output(self):
+        clock = [0.0]
+        audio = MagicMock()
+        audio.numel.return_value = 12
+
+        def pipe(**kwargs):
+            clock[0] += 7
+            return {"videos": [[object()] * 345], "audio": [audio], "sampling_rate": 48000}
+
+        @contextmanager
+        def use(key, loader):
+            yield pipe
+
+        def encode(videos, **kwargs):
+            clock[0] += 3
+            Path(kwargs["output_path"]).write_bytes(b"video and audio")
+
+        torch = SimpleNamespace(inference_mode=nullcontext, Generator=Mock(), isfinite=Mock())
+        torch.isfinite.return_value.all.return_value.item.return_value = True
+        runtime = SimpleNamespace(use=use, torch=torch, backend="musa")
+        with tempfile.TemporaryDirectory() as directory, patch(
+            "vocagent.benchmark.perf_counter", side_effect=lambda: clock[0],
+        ), patch.dict("sys.modules", {"diffusers": SimpleNamespace(), "diffusers.utils": SimpleNamespace(),
+                                     "diffusers.utils.export_utils": SimpleNamespace(encode_video=encode)}):
+            benchmark = Benchmark(Path(directory) / "benchmark.json")
+            output = Path(directory) / "video.mp4"
+            with benchmark.step("video.generation"):
+                MiniMaxH3VideoGenerator(runtime, "/models/h3").generate("hello", output)
+            total = benchmark.finish()["total"]
+            self.assertTrue(output.is_file())
+        self.assertEqual(total["model_run_seconds"], 7)
+        self.assertEqual(total["wall_seconds"], 10)
+        self.assertEqual(total["work"], {"frames": 345, "video_seconds": 14.375, "diffusion_steps": 49})
+
     def test_frame_count_obeys_vae_grid_and_duration_limits(self):
         frames = H3Settings().num_frames
         self.assertEqual((frames - 5) % 17, 0)

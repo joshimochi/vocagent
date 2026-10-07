@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import MagicMock, patch
 
+from vocagent.benchmark import Benchmark
 from vocagent.local_models import (
     ALIGNER_MODEL, ASR_MODEL, SHIELD_MODEL, SHIELD_POLICIES,
     LocalModelError, Qwen3SpeechToText, ShieldGemma2VideoSafety,
@@ -44,6 +45,31 @@ class Runtime:
 
 
 class SpeechTests(unittest.TestCase):
+    def test_speech_benchmark_measures_asr_and_alignment_call_and_audio_duration(self):
+        clock = [0.0]
+
+        def info(_):
+            clock[0] += 2
+            return SimpleNamespace(duration=10)
+
+        def transcribe(**kwargs):
+            clock[0] += 5
+            return [SimpleNamespace(text="Hello!", time_stamps=SimpleNamespace(items=[word("Hello", 0, 1)]))]
+
+        speech = SimpleNamespace(transcribe=MagicMock(side_effect=transcribe))
+        with tempfile.TemporaryDirectory() as directory, patch(
+            "vocagent.benchmark.perf_counter", side_effect=lambda: clock[0],
+        ), patch.dict("sys.modules", {"soundfile": SimpleNamespace(info=info)}):
+            path = Path(directory) / "audio.wav"
+            path.write_bytes(b"audio")
+            benchmark = Benchmark(Path(directory) / "benchmark.json")
+            with benchmark.step("speech"):
+                Qwen3SpeechToText(Runtime(speech)).transcribe(path)
+            total = benchmark.finish()["total"]
+        self.assertEqual(total["model_run_seconds"], 5)
+        self.assertEqual(total["wall_seconds"], 7)
+        self.assertEqual(total["work"], {"audio_seconds": 10})
+
     def test_alignment_preserves_original_punctuation_and_mixed_language(self):
         result = aligned_segments(
             "你好，café! Friend's apple.",
@@ -141,6 +167,47 @@ class SpeechTests(unittest.TestCase):
 
 
 class ShieldTests(unittest.TestCase):
+    def test_visual_benchmark_counts_only_reviewed_frames_and_unpadded_tokens(self):
+        clock = [0.0]
+        rows = iter(([[.1, .9]] * 3, [[.9, .1], [.1, .9], [.1, .9]]))
+
+        def classify(**inputs):
+            clock[0] += 5
+            tensor = MagicMock()
+            tensor.detach.return_value.float.return_value.cpu.return_value.tolist.return_value = next(rows)
+            return SimpleNamespace(probabilities=tensor)
+
+        mask = MagicMock()
+        mask.sum.return_value.item.return_value = 11
+        class Batch(dict):
+            def to(self, **kwargs):
+                return self
+
+        batch = Batch(input_ids=SimpleNamespace(shape=(3, 6)), attention_mask=mask)
+
+        def prepare(**kwargs):
+            clock[0] += 2
+            return batch
+
+        runtime = Runtime((MagicMock(side_effect=classify), MagicMock(side_effect=prepare)))
+        image = MagicMock()
+        frames = [VideoFrame(index, b"jpeg") for index in range(3)]
+        with tempfile.TemporaryDirectory() as directory, patch(
+            "vocagent.benchmark.perf_counter", side_effect=lambda: clock[0],
+        ), patch("vocagent.video_frames.sample_video_frames", return_value=frames), patch.dict(
+            "sys.modules", {"PIL": SimpleNamespace(Image=SimpleNamespace(open=lambda _: image)),
+                            "torch": SimpleNamespace(inference_mode=nullcontext)},
+        ):
+            benchmark = Benchmark(Path(directory) / "benchmark.json")
+            with benchmark.step("visual.safety"):
+                result = ShieldGemma2VideoSafety(runtime).check(Path("video.mp4"))
+            total = benchmark.finish()["total"]
+        self.assertFalse(result.safe)
+        self.assertEqual(total["model_run_seconds"], 10)
+        self.assertEqual(total["model_run_count"], 2)
+        self.assertEqual(total["wall_seconds"], 14)
+        self.assertEqual(total["work"], {"images": 2, "frames": 2, "input_tokens": 22})
+
     def test_yes_probability_is_the_violation_column(self):
         self.assertEqual(shield_verdict([[.1, .9]] * 3, [0], threshold=.5), SafetyResult(True))
         result = shield_verdict(
@@ -217,6 +284,7 @@ class ShieldTests(unittest.TestCase):
             probability_outputs.append(SimpleNamespace(probabilities=tensor))
         model.side_effect = probability_outputs
         processor = MagicMock()
+        processor.return_value.get.side_effect = AssertionError("Token telemetry ran without an active benchmark")
         processor.return_value.to.return_value = {"input_ids": "on_musa"}
         runtime = Runtime((model, processor))
         image = MagicMock()

@@ -4,6 +4,7 @@ import io
 import json
 import math
 
+from .benchmark import current_step, model_phase
 from .qwen import QwenError
 
 
@@ -126,9 +127,19 @@ class LocalChatClient:
                        "use_cache": not (self.vision and runtime.backend == "musa")}
             if temperature > 0:
                 options.update(temperature=temperature, top_p=.8)
-            with runtime.torch.inference_mode():
-                ids = model.generate(**inputs, **options)
-            tokens = ids[0, length:]
+            with model_phase("run", runtime, model=self.model_path) as phase:
+                if current_step() is not None:
+                    phase.add_work(input_tokens=length)
+                    if self.vision:
+                        phase.add_work(images=sum(
+                            item["type"] == "image" for message in messages
+                            for item in message["content"]
+                        ))
+                with runtime.torch.inference_mode():
+                    ids = model.generate(**inputs, **options)
+                tokens = ids[0, length:]
+                if current_step() is not None:
+                    phase.add_work(generated_tokens=len(tokens))
             eos = model.generation_config.eos_token_id
             eos = [eos] if isinstance(eos, int) else (eos or [])
             tokenizer = getattr(processor, "tokenizer", processor)

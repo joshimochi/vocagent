@@ -160,13 +160,43 @@ keys, or SSH tunnels.
 Outputs include `vocabulary.json`, the selected `outline.txt` and `storyboard.txt`,
 all accepted text candidates in `outline_candidates/` and `storyboard_candidates/`,
 safe video candidates and sidecars in `video_candidates/`, the selected
-`audio.wav` and `transcript.json`, `subtitles.ass`, and `final.mp4`.
+`audio.wav` and `transcript.json`, `subtitles.ass`, `final.mp4`, and `benchmark.json`.
 Text candidates are UTF-8 files named `candidate-N-attempt-M.txt`, with one-based
 candidate slot and attempt numbers. They are saved after passing safety and before
 quality selection, including accepted alternatives that were not selected.
 `--stop-after storyboard` also retains both text candidate directories. Earlier
 artifacts, including accepted text candidates, remain available after a provider
 or quality-selection failure.
+
+Every started workflow writes `benchmark.json`, including storyboard-only runs
+and failed runs. `result.benchmarks` points to the report. It records each
+generation, safety check, vocabulary check, selection, audio extraction, and
+subtitle operation, with candidate slot and attempt numbers for retries. The
+report contains per-call measurements, per-step aggregates, and a total for the
+workflow, including status and any failure. Input and output preflight failures
+that occur before the workflow starts do not create a report.
+
+Wall time is split into model loading, model running, and other work. Model
+loading measures checkpoint initialization and device placement; model running
+measures actual inference, including GPU synchronization. Other work includes
+preprocessing, media I/O, unloading, queueing for the shared GPU lock, and worker
+startup. Models already resident in memory need no new loading time. Each step's
+wall time sums its calls, so overlapping candidate threads can make the sum of
+step times larger than the workflow's actual elapsed time. The total reports
+both values. Workflow elapsed time starts after input/output validation and
+provider creation, and ends before the caller closes providers. Per-call CPU
+time measures the executing thread; total process CPU time covers all workflow
+threads, with isolated model worker CPU time reported separately. Token/frame
+counts, processed audio/video duration, and throughput are included when
+available; model throughput uses model running time.
+GPU memory reports peak allocated and reserved bytes by device, using the maximum
+observed peak across calls rather than adding memory usage. Custom providers
+still receive workflow wall and CPU timing; model-specific metrics require
+provider instrumentation.
+H3 worker measurements are imported into its generation step. If a hard timeout
+kills the worker before it saves a report, that call records
+`worker_benchmark_status: unavailable` rather than treating its missing model
+measurements as measured zero time.
 
 ```sh
 python3 -m unittest discover -s tests -v

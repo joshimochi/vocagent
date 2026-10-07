@@ -3,19 +3,22 @@
 import json
 import logging
 import shutil
+from contextvars import ContextVar
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Literal, Sequence
 
+from .benchmark import Benchmark
 from .media import FFmpegMedia
 from .models import SafetyResult, StoryboardResult, TranscriptSegment, WorkflowResult
 from .providers import Providers
-from .selection import select_candidate, validate_safety_result
+from .selection import select_candidate, validate_safety_result, validate_selection_index
 from .subtitles import validate_segments, write_ass
 from .vocabulary import missing_vocabulary
 
 
 log = logging.getLogger(__name__)
+_CANDIDATE_METADATA: ContextVar[dict] = ContextVar("candidate_metadata", default={})
 
 
 @dataclass(frozen=True)
@@ -72,11 +75,43 @@ class Workflow:
         if output.exists() and (not output.is_dir() or any(output.iterdir())):
             raise ValueError("Output directory must be new or empty to protect existing files.")
         output.mkdir(parents=True, exist_ok=True)
+        benchmark = Benchmark(output / "benchmark.json", metadata={
+            "stop_after": stop_after,
+            "vocabulary_count": len(words),
+            "outline_candidate_count": self.outline_candidate_count,
+            "storyboard_candidate_count": self.storyboard_candidate_count,
+            "video_candidate_count": self.video_candidate_count,
+            "concurrent_candidates": self.concurrent_candidates,
+        })
+        candidate_token = _CANDIDATE_METADATA.set({})
+        try:
+            result = self._run(words, output, stop_after, benchmark)
+        except BaseException as exc:
+            try:
+                benchmark.finish(error=exc)
+            except OSError:
+                log.exception("Could not save the failed workflow benchmark")
+            raise
+        finally:
+            _CANDIDATE_METADATA.reset(candidate_token)
+        benchmark.finish()
+        return result
+
+    def _run(
+        self,
+        words: tuple[str, ...],
+        output: Path,
+        stop_after: Literal["storyboard", "video"],
+        benchmark: Benchmark,
+    ) -> StoryboardResult | WorkflowResult:
         (output / "vocabulary.json").write_text(
             json.dumps(words, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
         )
 
         providers = self.providers
+        # Each candidate's callbacks execute in the same thread. Context-local
+        # metadata keeps parallel slots and their retries attributed correctly.
+        candidate_metadata = _CANDIDATE_METADATA
 
         def checked_text(text: str) -> str:
             if not isinstance(text, str) or not text.strip():
@@ -87,18 +122,31 @@ class Workflow:
             path = directory / f"candidate-{slot}-attempt-{attempt}.txt"
             path.write_text(text, encoding="utf-8")
 
+        def generate_outline(slot: int, attempt: int, feedback: str | None) -> str:
+            candidate_metadata.set({"slot": slot, "attempt": attempt})
+            with benchmark.step("outline.generation", **candidate_metadata.get()):
+                return checked_text(providers.llm.generate_outline(words, feedback))
+
+        def check_text(stage: str, text: str) -> SafetyResult:
+            with benchmark.step(f"{stage}.safety", **candidate_metadata.get()) as step:
+                result = validate_safety_result(providers.text_safety.check(stage, text), stage)
+                step.outcome("passed" if result.safe else "rejected")
+                return result
+
+        def choose_text(stage: str, candidates: Sequence[str]) -> int:
+            with benchmark.step(f"{stage}.selection", candidate_count=len(candidates)):
+                return validate_selection_index(
+                    providers.text_quality.choose(stage, words, candidates), len(candidates), stage,
+                )
+
         outline_candidates_dir = output / "outline_candidates"
         outline_candidates_dir.mkdir()
         outline = select_candidate(
             stage="outline",
             candidate_count=self.outline_candidate_count,
-            generate=lambda slot, attempt, feedback: checked_text(
-                providers.llm.generate_outline(words, feedback)
-            ),
-            check_safety=lambda text: providers.text_safety.check("outline", text),
-            choose_best=lambda candidates: providers.text_quality.choose(
-                "outline", words, candidates
-            ),
+            generate=generate_outline,
+            check_safety=lambda text: check_text("outline", text),
+            choose_best=lambda candidates: choose_text("outline", candidates),
             pass_feedback=True,
             concurrent_candidates=self.concurrent_candidates,
             on_accept=lambda slot, attempt, text: save_text_candidate(
@@ -110,16 +158,18 @@ class Workflow:
 
         storyboard_candidates_dir = output / "storyboard_candidates"
         storyboard_candidates_dir.mkdir()
+
+        def generate_storyboard(slot: int, attempt: int, feedback: str | None) -> str:
+            candidate_metadata.set({"slot": slot, "attempt": attempt})
+            with benchmark.step("storyboard.generation", **candidate_metadata.get()):
+                return checked_text(providers.llm.generate_storyboard(words, outline, feedback))
+
         storyboard = select_candidate(
             stage="storyboard",
             candidate_count=self.storyboard_candidate_count,
-            generate=lambda slot, attempt, feedback: checked_text(
-                providers.llm.generate_storyboard(words, outline, feedback)
-            ),
-            check_safety=lambda text: providers.text_safety.check("storyboard", text),
-            choose_best=lambda candidates: providers.text_quality.choose(
-                "storyboard", words, candidates
-            ),
+            generate=generate_storyboard,
+            check_safety=lambda text: check_text("storyboard", text),
+            choose_best=lambda candidates: choose_text("storyboard", candidates),
             pass_feedback=True,
             concurrent_candidates=self.concurrent_candidates,
             on_accept=lambda slot, attempt, text: save_text_candidate(
@@ -129,21 +179,29 @@ class Workflow:
         storyboard_path = output / "storyboard.txt"
         storyboard_path.write_text(storyboard, encoding="utf-8")
         if stop_after == "storyboard":
-            return StoryboardResult(outline=outline_path, storyboard=storyboard_path)
+            return StoryboardResult(
+                outline=outline_path, storyboard=storyboard_path,
+                benchmarks=output / "benchmark.json",
+            )
 
         media = self.media if self.media is not None else FFmpegMedia()
         candidates_dir = output / "video_candidates"
         candidates_dir.mkdir()
 
         def generate_video(slot: int, attempt: int, feedback: str | None) -> _VideoCandidate:
+            candidate_metadata.set({"slot": slot, "attempt": attempt})
             path = candidates_dir / f"candidate-{slot}-attempt-{attempt}.mp4"
-            providers.video.generate(storyboard, path)
-            if not path.is_file() or path.stat().st_size == 0:
-                raise ValueError(f"Video generator did not write a nonempty video: {path}")
+            with benchmark.step("video.generation", **candidate_metadata.get()):
+                providers.video.generate(storyboard, path)
+                if not path.is_file() or path.stat().st_size == 0:
+                    raise ValueError(f"Video generator did not write a nonempty video: {path}")
             audio = path.with_suffix(".wav")
-            media.extract_audio(path, audio)
-            segments = tuple(providers.speech_to_text.transcribe(audio))
-            validate_segments(segments)
+            with benchmark.step("audio.extraction", **candidate_metadata.get()):
+                media.extract_audio(path, audio)
+            with benchmark.step("speech.transcription", **candidate_metadata.get()) as step:
+                segments = tuple(providers.speech_to_text.transcribe(audio))
+                validate_segments(segments)
+                step.add_work(transcript_segments=len(segments))
             transcript = path.with_suffix(".json")
             transcript.write_text(
                 json.dumps([asdict(segment) for segment in segments], ensure_ascii=False,
@@ -153,15 +211,19 @@ class Workflow:
             return _VideoCandidate(path, audio, transcript, segments)
 
         def check_video(candidate: _VideoCandidate) -> SafetyResult:
-            visual = validate_safety_result(
-                providers.video_safety.check(candidate.video), "video visuals"
-            )
-            audio = validate_safety_result(
-                providers.audio_safety.check("\n".join(
-                    segment.text for segment in candidate.segments
-                )),
-                "video audio",
-            )
+            with benchmark.step("video.safety", **candidate_metadata.get()) as step:
+                visual = validate_safety_result(
+                    providers.video_safety.check(candidate.video), "video visuals"
+                )
+                step.outcome("passed" if visual.safe else "rejected")
+            with benchmark.step("audio.safety", **candidate_metadata.get()) as step:
+                audio = validate_safety_result(
+                    providers.audio_safety.check("\n".join(
+                        segment.text for segment in candidate.segments
+                    )),
+                    "video audio",
+                )
+                step.outcome("passed" if audio.safe else "rejected")
             if not visual.safe or not audio.safe:
                 log.warning(
                     "Rejected %s: visual_safe=%s visual_reason=%r "
@@ -175,9 +237,12 @@ class Workflow:
             return SafetyResult(True)
 
         def check_spoken_vocabulary(candidate: _VideoCandidate) -> str | None:
-            missing = missing_vocabulary(words, "\n".join(
-                segment.text for segment in candidate.segments
-            ))
+            with benchmark.step("vocabulary.validation", **candidate_metadata.get()) as step:
+                missing = missing_vocabulary(words, "\n".join(
+                    segment.text for segment in candidate.segments
+                ))
+                step.add_work(vocabulary_items=len(words), missing_vocabulary_items=len(missing))
+                step.outcome("rejected" if missing else "passed")
             if not missing:
                 return None
             reason = "Recognized speech is missing requested vocabulary: " + ", ".join(
@@ -188,15 +253,22 @@ class Workflow:
                 path.unlink()
             return reason
 
+        def choose_video(candidates: Sequence[_VideoCandidate]) -> int:
+            with benchmark.step("video.selection", candidate_count=len(candidates)):
+                return validate_selection_index(
+                    providers.video_quality.choose(
+                        storyboard, tuple(candidate.video for candidate in candidates)
+                    ),
+                    len(candidates), "video",
+                )
+
         selected = select_candidate(
             stage="video",
             candidate_count=self.video_candidate_count,
             generate=generate_video,
             check_safety=check_video,
             check_content=check_spoken_vocabulary,
-            choose_best=lambda candidates: providers.video_quality.choose(
-                storyboard, tuple(candidate.video for candidate in candidates)
-            ),
+            choose_best=choose_video,
             pass_feedback=False,
             concurrent_candidates=self.concurrent_candidates,
         )
@@ -205,9 +277,12 @@ class Workflow:
         transcript_path = output / "transcript.json"
         shutil.copyfile(selected.audio, audio_path)
         shutil.copyfile(selected.transcript, transcript_path)
-        subtitles_path = write_ass(selected.segments, output / "subtitles.ass")
+        with benchmark.step("subtitles.write") as step:
+            subtitles_path = write_ass(selected.segments, output / "subtitles.ass")
+            step.add_work(subtitle_cues=len(selected.segments))
         final_path = output / "final.mp4"
-        media.burn_subtitles(selected.video, subtitles_path, final_path)
+        with benchmark.step("subtitles.burn"):
+            media.burn_subtitles(selected.video, subtitles_path, final_path)
         return WorkflowResult(
             outline=outline_path,
             storyboard=storyboard_path,
@@ -216,4 +291,5 @@ class Workflow:
             transcript=transcript_path,
             subtitles=subtitles_path,
             final_video=final_path,
+            benchmarks=output / "benchmark.json",
         )

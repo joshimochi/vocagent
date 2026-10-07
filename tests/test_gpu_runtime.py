@@ -1,7 +1,7 @@
 """GPU placement and serialized model residency, without accelerator dependencies."""
 
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import nullcontext
+from contextlib import contextmanager, nullcontext
 from threading import Event
 from types import SimpleNamespace
 import unittest
@@ -113,6 +113,39 @@ class GPURuntimeTests(unittest.TestCase):
         with runtime.use("vl", loader) as resource:
             self.assertIsNotNone(resource)
         self.assertEqual(loader.call_count, 2)
+
+    def test_only_real_loaders_are_measured_once_and_after_eviction(self):
+        runtime, accelerator = runtime_with_accelerator()
+        phases = []
+        active = []
+
+        @contextmanager
+        def measure(kind, selected_runtime, model=None):
+            self.assertIs(selected_runtime, runtime)
+            self.assertFalse(active)
+            phases.append((kind, model))
+            active.append(kind)
+            try:
+                yield
+            finally:
+                active.pop()
+
+        def load():
+            self.assertEqual(active, ["load"])
+            return object()
+
+        accelerator.empty_cache.side_effect = lambda: self.assertFalse(active)
+        with patch("vocagent.gpu_runtime.model_phase", side_effect=measure):
+            with runtime.use("first", load):
+                self.assertFalse(active)
+            with runtime.use("first", lambda: self.fail("cached weights reloaded")):
+                self.assertFalse(active)
+            with runtime.use("second", load):
+                self.assertFalse(active)
+            with runtime.use("sentinel", object, measure_load=False):
+                self.assertFalse(active)
+            runtime.close()
+        self.assertEqual(phases, [("load", "first"), ("load", "second")])
 
     def test_parameter_placement_device_map_and_offload_hooks_are_checked(self):
         runtime, _ = runtime_with_accelerator()

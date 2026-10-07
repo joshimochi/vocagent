@@ -9,6 +9,7 @@ import tempfile
 import types
 from typing import ClassVar
 
+from .benchmark import current_step, model_phase
 from .providers import VideoGenerator
 from .gpu_boundaries import align_h3_residual_outputs
 
@@ -339,13 +340,19 @@ class MiniMaxH3VideoGenerator(VideoGenerator):
         output_path.parent.mkdir(parents=True, exist_ok=True)
         with self.runtime.use(("minimax-h3", str(self.model_path.resolve())), self._load) as pipe:
             torch = self.runtime.torch
-            with torch.inference_mode():
-                result = pipe(
-                    prompt=storyboard, width=self.settings.width, height=self.settings.height,
-                    num_frames=self.settings.num_frames, num_inference_steps=self.settings.steps,
-                    generator=torch.Generator(device="cpu").manual_seed(secrets.randbits(32)),
-                    output=["videos", "audio", "sampling_rate"],
-                )
+            with model_phase("run", self.runtime, model=str(self.model_path)) as phase:
+                with torch.inference_mode():
+                    result = pipe(
+                        prompt=storyboard, width=self.settings.width, height=self.settings.height,
+                        num_frames=self.settings.num_frames, num_inference_steps=self.settings.steps,
+                        generator=torch.Generator(device="cpu").manual_seed(secrets.randbits(32)),
+                        output=["videos", "audio", "sampling_rate"],
+                    )
+                if current_step() is not None:
+                    frames = len(result["videos"][0])
+                    # H3's configured sigma points delimit one fewer denoise updates.
+                    phase.add_work(frames=frames, video_seconds=frames / 24,
+                                   diffusion_steps=self.settings.steps - 1)
             audio = result["audio"][0]
             if audio.numel() == 0 or not torch.isfinite(audio).all().item():
                 raise RuntimeError("H3 produced missing or nonfinite audio.")

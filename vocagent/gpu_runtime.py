@@ -1,9 +1,11 @@
 """Serialized, GPU-only model residency for the local hs providers."""
 
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 import gc
 import logging
 from threading import RLock
+
+from .benchmark import model_phase
 
 
 log = logging.getLogger(__name__)
@@ -82,7 +84,7 @@ class GPURuntime:
                 accelerator.empty_cache()
 
     @contextmanager
-    def use(self, key, loader):
+    def use(self, key, loader, *, measure_load=True):
         # Hold the lock throughout inference. Concurrent candidate threads may
         # preprocess in parallel but cannot evict a model another thread is using.
         with self._lock:
@@ -90,7 +92,9 @@ class GPURuntime:
                 self._release()
                 log.info("Loading %s on GPU", key)
                 try:
-                    self._resource = loader()
+                    phase = model_phase("load", self, model=str(key)) if measure_load else nullcontext()
+                    with phase:
+                        self._resource = loader()
                 except BaseException:
                     self._resource = None
                     gc.collect()

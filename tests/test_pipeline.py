@@ -91,6 +91,58 @@ class PipelineTests(unittest.TestCase):
         )
         self.workflow = Workflow(self.providers, self.media)
 
+    def test_benchmarks_cover_each_step_and_total_for_a_complete_run(self):
+        result = self.workflow.run(["apple", "pear"], self.output)
+
+        self.assertEqual(result.benchmarks, self.output / "benchmark.json")
+        report = json.loads(result.benchmarks.read_text(encoding="utf-8"))
+        self.assertEqual(report["status"], "completed")
+        self.assertIsNone(report["error"])
+        steps = {step["name"]: step for step in report["steps"]}
+        expected_calls = {
+            "outline.generation": 2,
+            "outline.safety": 2,
+            "outline.selection": 1,
+            "storyboard.generation": 2,
+            "storyboard.safety": 2,
+            "storyboard.selection": 1,
+            "video.generation": 2,
+            "audio.extraction": 2,
+            "speech.transcription": 2,
+            "video.safety": 2,
+            "audio.safety": 2,
+            "vocabulary.validation": 2,
+            "video.selection": 1,
+            "subtitles.write": 1,
+            "subtitles.burn": 1,
+        }
+        self.assertEqual({name: step["calls"] for name, step in steps.items()}, expected_calls)
+        self.assertEqual(len(report["calls"]), sum(expected_calls.values()))
+        for name, step in steps.items():
+            with self.subTest(step=name):
+                calls = [item for item in report["calls"] if item["name"] == name]
+                self.assertEqual(step["failed_calls"], 0)
+                self.assertAlmostEqual(
+                    step["cumulative_wall_seconds"], sum(item["wall_seconds"] for item in calls),
+                )
+                self.assertGreaterEqual(step["cumulative_wall_seconds"], 0)
+                # Uninstrumented custom providers still have measured workflow time.
+                self.assertEqual(step["model_load_seconds"], 0)
+                self.assertEqual(step["model_run_seconds"], 0)
+                if name.endswith(".safety") or name == "vocabulary.validation":
+                    self.assertEqual(step["outcomes"], {"passed": expected_calls[name]})
+        total = report["total"]
+        self.assertEqual(total["calls"], sum(expected_calls.values()))
+        self.assertEqual(total["failed_calls"], 0)
+        self.assertGreaterEqual(total["wall_seconds"], 0)
+        self.assertGreaterEqual(total["process_cpu_seconds"], 0)
+        self.assertAlmostEqual(
+            total["cumulative_step_wall_seconds"],
+            sum(step["cumulative_wall_seconds"] for step in steps.values()),
+        )
+        self.assertEqual(total["model_load_seconds"], 0)
+        self.assertEqual(total["model_run_seconds"], 0)
+
     def test_chosen_candidates_flow_through_the_complete_workflow(self):
         result = self.workflow.run([" apple ", "pear"], self.output)
 
@@ -193,7 +245,7 @@ class PipelineTests(unittest.TestCase):
                          ["apple", "pear"])
         self.assertEqual({path.name for path in self.output.iterdir()},
                          {"vocabulary.json", "outline.txt", "storyboard.txt",
-                          "outline_candidates", "storyboard_candidates"})
+                          "outline_candidates", "storyboard_candidates", "benchmark.json"})
         self.assertEqual({
             path.name: path.read_text(encoding="utf-8")
             for path in (self.output / "outline_candidates").iterdir()
@@ -214,6 +266,16 @@ class PipelineTests(unittest.TestCase):
             call(("apple", "pear"), "outline 2", "use safe scenes"),
             call(("apple", "pear"), "outline 2", None),
         ])
+        self.assertEqual(result.benchmarks, self.output / "benchmark.json")
+        report = json.loads(result.benchmarks.read_text(encoding="utf-8"))
+        self.assertEqual(report["status"], "completed")
+        steps = {step["name"]: step for step in report["steps"]}
+        self.assertEqual(set(steps), {
+            "outline.generation", "outline.safety", "outline.selection",
+            "storyboard.generation", "storyboard.safety", "storyboard.selection",
+        })
+        self.assertEqual(steps["storyboard.generation"]["calls"], 3)
+        self.assertEqual(steps["storyboard.safety"]["outcomes"], {"passed": 2, "rejected": 1})
         self.video.generate.assert_not_called()
         self.video_safety.check.assert_not_called()
         self.audio_safety.check.assert_not_called()
@@ -230,6 +292,13 @@ class PipelineTests(unittest.TestCase):
 
         self.assertTrue((self.output / "outline.txt").is_file())
         self.assertFalse((self.output / "storyboard.txt").exists())
+        report = json.loads((self.output / "benchmark.json").read_text(encoding="utf-8"))
+        self.assertEqual(report["status"], "failed")
+        self.assertIn("storyboard", report["error"]["message"])
+        steps = {step["name"]: step for step in report["steps"]}
+        self.assertEqual(steps["storyboard.generation"]["calls"], 8)
+        self.assertEqual(steps["storyboard.safety"]["outcomes"], {"rejected": 8})
+        self.assertNotIn("storyboard.selection", steps)
         self.video.generate.assert_not_called()
         self.media.extract_audio.assert_not_called()
 
@@ -306,6 +375,18 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(self.llm.generate_outline.call_count, 2)
         self.assertEqual(self.llm.generate_storyboard.call_count, 2)
         self.assertEqual(self.video.generate.call_count, 2)
+        report = json.loads(result.benchmarks.read_text(encoding="utf-8"))
+        for name in (
+            "outline.generation", "outline.safety", "storyboard.generation",
+            "storyboard.safety", "video.generation", "audio.extraction",
+            "speech.transcription", "video.safety", "audio.safety", "vocabulary.validation",
+        ):
+            with self.subTest(step=name):
+                calls = [item for item in report["calls"] if item["name"] == name]
+                self.assertCountEqual([
+                    (item["metadata"]["slot"], item["metadata"]["attempt"])
+                    for item in calls
+                ], [(1, 1), (2, 1)])
 
     def test_candidate_counts_are_independent_and_control_stage_concurrency(self):
         self.text_quality.choose.side_effect = (
@@ -435,6 +516,27 @@ class PipelineTests(unittest.TestCase):
         self.assertFalse((self.output / "outline.txt").exists())
         self.llm.generate_storyboard.assert_not_called()
 
+    def test_invalid_quality_decisions_are_recorded_as_failed_selections(self):
+        for rejected_stage in ("outline", "storyboard", "video"):
+            with self.subTest(stage=rejected_stage):
+                self.text_quality.choose.side_effect = (
+                    lambda stage, vocabulary, candidates, rejected_stage=rejected_stage:
+                    2 if stage == rejected_stage else 0
+                )
+                self.video_quality.choose.return_value = 2 if rejected_stage == "video" else 0
+                output = self.output / rejected_stage
+
+                with self.assertRaisesRegex(ValueError, f"{rejected_stage}.*integer index"):
+                    self.workflow.run(["apple"], output)
+
+                report = json.loads((output / "benchmark.json").read_text(encoding="utf-8"))
+                self.assertEqual(report["status"], "failed")
+                self.assertEqual(report["total"]["failed_calls"], 1)
+                failed_call, = [item for item in report["calls"] if item["status"] == "failed"]
+                self.assertEqual(failed_call["name"], f"{rejected_stage}.selection")
+                self.assertEqual(failed_call["error"]["type"], "ValueError")
+                self.assertEqual(failed_call["metadata"], {"candidate_count": 2})
+
     def test_accepted_texts_survive_a_later_storyboard_provider_failure(self):
         failure = RuntimeError("storyboard provider unavailable")
         self.llm.generate_storyboard.side_effect = ["Accepted storyboard 苹果.", failure]
@@ -459,6 +561,17 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(self.llm.generate_storyboard.call_count, 2)
         self.text_quality.choose.assert_called_once()
         self.video.generate.assert_not_called()
+        report = json.loads((self.output / "benchmark.json").read_text(encoding="utf-8"))
+        self.assertEqual(report["status"], "failed")
+        self.assertIn("storyboard provider unavailable", report["error"]["message"])
+        steps = {step["name"]: step for step in report["steps"]}
+        self.assertEqual(steps["storyboard.generation"]["calls"], 2)
+        self.assertEqual(steps["storyboard.generation"]["failed_calls"], 1)
+        self.assertEqual(steps["storyboard.safety"]["calls"], 1)
+        self.assertNotIn("storyboard.selection", steps)
+        failed_call, = [item for item in report["calls"] if item["status"] == "failed"]
+        self.assertEqual(failed_call["name"], "storyboard.generation")
+        self.assertEqual(failed_call["metadata"], {"slot": 2, "attempt": 1})
 
     def test_unsafe_video_is_deleted_before_regeneration_without_feedback(self):
         rejected = self.output / "video_candidates" / "candidate-1-attempt-1.mp4"
@@ -545,6 +658,16 @@ class PipelineTests(unittest.TestCase):
             "candidate-1-attempt-2.mp4", "candidate-2-attempt-1.mp4",
         ])
         self.assertEqual(json.loads(result.transcript.read_text())[0]["text"], "An apple.")
+        report = json.loads(result.benchmarks.read_text(encoding="utf-8"))
+        steps = {step["name"]: step for step in report["steps"]}
+        self.assertEqual(steps["video.generation"]["calls"], 3)
+        self.assertEqual(steps["vocabulary.validation"]["outcomes"], {"passed": 2, "rejected": 1})
+        rejected_call, = [
+            item for item in report["calls"]
+            if item["name"] == "vocabulary.validation" and item["outcome"] == "rejected"
+        ]
+        self.assertEqual(rejected_call["metadata"], {"slot": 1, "attempt": 1})
+        self.assertEqual(report["total"]["failed_calls"], 0)
 
     def test_unrelated_safe_speech_never_publishes_a_successful_video(self):
         self.speech_to_text.transcribe.return_value = [
