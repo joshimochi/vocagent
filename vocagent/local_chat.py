@@ -1,6 +1,5 @@
 """Transformers chat client with explicit GPU placement and on-demand residency."""
 
-import base64
 import io
 import json
 import math
@@ -68,19 +67,16 @@ class LocalChatClient:
             elif isinstance(content, list):
                 parts = []
                 for item in content:
-                    if item["type"] == "image_url":
+                    if item["type"] == "image":
                         image_count += 1
                         if image_count > MAX_IMAGES:
                             raise ValueError(f"Local vision accepts at most {MAX_IMAGES} images.")
-                        prefix, separator, data = item["image_url"]["url"].partition(",")
-                        if not separator or prefix != "data:image/jpeg;base64":
-                            raise ValueError("Local vision accepts JPEG data URLs only.")
-                        if len(data) > 4 * ((MAX_IMAGE_BYTES + 2) // 3):
+                        jpeg = item["image"]
+                        if not isinstance(jpeg, bytes):
+                            raise ValueError("Local vision frames must be JPEG bytes.")
+                        if len(jpeg) > MAX_IMAGE_BYTES:
                             raise ValueError("Local vision frame exceeds the 8 MiB limit.")
-                        decoded = base64.b64decode(data, validate=True)
-                        if len(decoded) > MAX_IMAGE_BYTES:
-                            raise ValueError("Local vision frame exceeds the 8 MiB limit.")
-                        with Image.open(io.BytesIO(decoded)) as picture:
+                        with Image.open(io.BytesIO(jpeg)) as picture:
                             if picture.format != "JPEG":
                                 raise ValueError("Local vision frame must contain JPEG pixels.")
                             if picture.width * picture.height > MAX_IMAGE_PIXELS:
@@ -97,7 +93,7 @@ class LocalChatClient:
             converted.append({"role": message["role"], "content": content})
         return converted
 
-    def complete(self, messages, *, max_tokens, temperature, non_thinking=False, json_output=False):
+    def complete(self, messages, *, max_tokens, temperature, non_thinking=False):
         if type(max_tokens) is not int or max_tokens < 1:
             raise ValueError("Local generation token limit must be a positive integer.")
         if (isinstance(temperature, bool) or not isinstance(temperature, (int, float))

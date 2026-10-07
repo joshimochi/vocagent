@@ -1,6 +1,5 @@
 """Actual-pixel sampling contracts and FFmpeg integration for visual models."""
 
-import base64
 import json
 from pathlib import Path
 import shutil
@@ -23,14 +22,14 @@ class VideoFrameTests(unittest.TestCase):
     def probe(self, duration=10, rate="30/1"):
         return json.dumps({"streams": [{"duration": duration, "avg_frame_rate": rate}]}).encode()
 
-    def test_uniform_mode_covers_both_ends_and_embeds_actual_jpeg_bytes(self):
+    def test_uniform_mode_covers_both_ends_and_returns_actual_jpeg_bytes(self):
         jpeg = b"\xff\xd8frame\xff\xd9"
         with patch("vocagent.video_frames._run", side_effect=[self.probe(), jpeg, jpeg, jpeg]) as run:
             frames = sample_video_frames(self.path, max_frames=3, max_side=448)
         self.assertEqual(len(frames), 3)
         self.assertEqual(frames[0].timestamp, 0)
         self.assertAlmostEqual(frames[-1].timestamp, 10 - 1 / 30)
-        self.assertEqual(base64.b64decode(frames[0].data_url.split(",", 1)[1]), jpeg)
+        self.assertEqual(frames[0].jpeg, jpeg)
         args = run.call_args_list[-1].args[0]
         self.assertIn("scale=448:448:force_original_aspect_ratio=decrease", args)
 

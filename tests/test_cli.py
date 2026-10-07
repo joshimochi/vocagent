@@ -10,7 +10,25 @@ from unittest.mock import Mock, patch
 
 from vocagent.__main__ import load_providers, main
 from vocagent.models import SafetyResult, StoryboardResult
-from vocagent.providers import LLMGenerator, Providers, TextSafetyAgent
+from vocagent.providers import (
+    AudioSafetyModel, LLMGenerator, Providers, SpeechToText, TextQualityAgent,
+    TextSafetyAgent, VideoGenerator, VideoQualityModel, VideoSafetyModel,
+)
+
+
+def providers_for_test(**overrides):
+    dependencies = {
+        "llm": Mock(spec=LLMGenerator),
+        "text_safety": Mock(spec=TextSafetyAgent),
+        "text_quality": Mock(spec=TextQualityAgent),
+        "video": Mock(spec=VideoGenerator),
+        "video_safety": Mock(spec=VideoSafetyModel),
+        "video_quality": Mock(spec=VideoQualityModel),
+        "speech_to_text": Mock(spec=SpeechToText),
+        "audio_safety": Mock(spec=AudioSafetyModel),
+    }
+    dependencies.update(overrides)
+    return Providers(**dependencies)
 
 
 class CLITests(unittest.TestCase):
@@ -18,24 +36,29 @@ class CLITests(unittest.TestCase):
         stderr = io.StringIO()
         stdout = io.StringIO()
         with patch("vocagent.__main__.load_providers",
-                   side_effect=ValueError("Configure the Qwen endpoints")) as load, \
+                   side_effect=ValueError("Configure the local model checkpoints")) as load, \
                 redirect_stderr(stderr), redirect_stdout(stdout):
             status = main(["apple", "--stop-after", "storyboard"])
 
         load.assert_called_once_with("vocagent.local:create_providers")
         self.assertEqual(status, 1)
-        self.assertIn("Workflow stopped: Configure the Qwen endpoints", stderr.getvalue())
+        self.assertIn("Workflow stopped: Configure the local model checkpoints", stderr.getvalue())
         self.assertEqual(stdout.getvalue(), "")
 
     def test_local_factory_explicit_stop_at_storyboard(self):
         llm = Mock(spec=LLMGenerator)
         llm.generate_outline.return_value = "A story about an apple."
-        llm.generate_storyboard.return_value = "Scene 1: An apple falls."
+        storyboard = (
+            "integrated_multimodal_description: [Shot 1] A friend (S1) catches an apple "
+            "and says <d>[English] Apple!</d>\n"
+            "overall_soundscape: Leaves rustle.\nnon_diegetic_music: N/A"
+        )
+        llm.generate_storyboard.return_value = storyboard
         safety = Mock(spec=TextSafetyAgent)
         safety.check.return_value = SafetyResult(True)
         quality = Mock()
         quality.choose.return_value = 0
-        providers = Providers(llm=llm, text_safety=safety, text_quality=quality)
+        providers = providers_for_test(llm=llm, text_safety=safety, text_quality=quality)
         with tempfile.TemporaryDirectory() as temporary:
             stdout = io.StringIO()
             with patch("vocagent.__main__.load_providers", return_value=providers) as load, \
@@ -46,31 +69,13 @@ class CLITests(unittest.TestCase):
             load.assert_called_once_with("vocagent.local:create_providers")
             output = Path(temporary)
             self.assertEqual(stdout.getvalue(), f"{output / 'storyboard.txt'}\n")
-            self.assertEqual((output / "storyboard.txt").read_text(), "Scene 1: An apple falls.")
+            self.assertEqual((output / "storyboard.txt").read_text(), storyboard)
             self.assertEqual({path.name for path in output.iterdir()}, {
                 "vocabulary.json", "outline.txt", "storyboard.txt",
             })
 
-    def test_explicit_qwen_factory_defaults_to_storyboard(self):
-        providers = Providers()
-        result = StoryboardResult(Path("/tmp/outline.txt"), Path("/tmp/storyboard.txt"))
-        stdout = io.StringIO()
-        with patch("vocagent.__main__.load_providers", return_value=providers) as load, \
-                patch("vocagent.__main__.Workflow") as workflow, \
-                redirect_stdout(stdout):
-            workflow.return_value.run.return_value = result
-            status = main(["apple", "--providers", "vocagent.qwen:create_providers",
-                           "--output-dir", "chosen"])
-
-        self.assertEqual(status, 0)
-        load.assert_called_once_with("vocagent.qwen:create_providers")
-        workflow.return_value.run.assert_called_once_with(
-            ["apple"], Path("chosen"), stop_after="storyboard",
-        )
-        self.assertEqual(stdout.getvalue(), f"{result.storyboard}\n")
-
     def test_default_local_factory_runs_full_video_and_releases_gpu_runtime(self):
-        providers = Providers()
+        providers = providers_for_test()
         providers.close = Mock()
         final_path = Path("/tmp/local-final.mp4")
         stdout = io.StringIO()
@@ -87,7 +92,7 @@ class CLITests(unittest.TestCase):
         self.assertEqual(stdout.getvalue(), f"{final_path}\n")
 
     def test_local_runtime_is_released_when_gpu_inference_fails(self):
-        providers = Providers()
+        providers = providers_for_test()
         providers.close = Mock()
         stderr = io.StringIO()
         with patch("vocagent.__main__.load_providers", return_value=providers), \
@@ -98,11 +103,11 @@ class CLITests(unittest.TestCase):
         self.assertIn("GPU allocation failed", stderr.getvalue())
         providers.close.assert_called_once_with()
 
-    def test_explicit_stop_stage_overrides_each_provider_default(self):
+    def test_explicit_stop_stage_applies_to_each_provider(self):
         for factory_args in ([], ["--providers", "example:build"]):
             for stage in ("storyboard", "video"):
                 with self.subTest(factory_args=factory_args, stage=stage), \
-                        patch("vocagent.__main__.load_providers", return_value=Providers()), \
+                        patch("vocagent.__main__.load_providers", return_value=providers_for_test()), \
                         patch("vocagent.__main__.Workflow") as workflow, \
                         redirect_stdout(io.StringIO()):
                     workflow.return_value.run.return_value = (
@@ -121,7 +126,7 @@ class CLITests(unittest.TestCase):
         llm.generate_outline.return_value = "unsafe outline"
         safety = Mock(spec=TextSafetyAgent)
         safety.check.return_value = SafetyResult(False, "unsafe content")
-        providers = Providers(llm=llm, text_safety=safety)
+        providers = providers_for_test(llm=llm, text_safety=safety)
         with tempfile.TemporaryDirectory() as temporary:
             stderr = io.StringIO()
             with patch("vocagent.__main__.load_providers", return_value=providers), \
@@ -134,7 +139,7 @@ class CLITests(unittest.TestCase):
         self.assertEqual(llm.generate_outline.call_count, 8)
 
     def test_custom_provider_defaults_to_video_and_prints_final_path(self):
-        providers = Providers()
+        providers = providers_for_test()
         final_path = Path("/tmp/example-final.mp4")
         stdout = io.StringIO()
         with patch("vocagent.__main__.load_providers", return_value=providers) as load, \
@@ -158,7 +163,7 @@ class CLITests(unittest.TestCase):
     def test_candidate_counts_are_forwarded_independently(self):
         for concurrent_candidates in (False, True):
             with self.subTest(concurrent_candidates=concurrent_candidates):
-                providers = Providers()
+                providers = providers_for_test()
                 with patch("vocagent.__main__.load_providers", return_value=providers), \
                         patch("vocagent.__main__.Workflow") as workflow, \
                         redirect_stdout(io.StringIO()):
@@ -204,7 +209,7 @@ class CLITests(unittest.TestCase):
                     self.assertFalse(output.exists())
 
     def test_concurrent_candidates_flag_enables_concurrency(self):
-        providers = Providers()
+        providers = providers_for_test()
         with patch("vocagent.__main__.load_providers", return_value=providers), \
                 patch("vocagent.__main__.Workflow") as workflow, \
                 redirect_stdout(io.StringIO()):
@@ -239,7 +244,7 @@ class CLITests(unittest.TestCase):
 class ProviderFactoryTests(unittest.TestCase):
     def test_factory_is_loaded_and_called_without_arguments(self):
         module = ModuleType("test_workflow_providers")
-        providers = Providers()
+        providers = providers_for_test()
         module.build = Mock(return_value=providers)
         with patch.dict("sys.modules", {module.__name__: module}):
             actual = load_providers(f"{module.__name__}:build")

@@ -14,7 +14,7 @@ from .qwen import QwenAudioSafety, QwenGenerator, QwenGuard, QwenQuality, QwenVi
 
 @dataclass
 class LocalProviders(Providers):
-    runtime: GPURuntime = field(default=None, repr=False)
+    runtime: GPURuntime = field(repr=False)
 
     def close(self):
         self.runtime.close()
@@ -36,7 +36,7 @@ def create_providers(environ: Mapping[str, str] | None = None) -> Providers:
     asr = checkpoint("QWEN_ASR_MODEL", "Qwen3-ASR-1.7B")
     aligner = checkpoint("QWEN_ALIGNER_MODEL", "Qwen3-ForcedAligner-0.6B")
     shield = checkpoint("SHIELDGEMMA_MODEL", "shieldgemma-2-4b-it")
-    # Delayed import keeps model SDKs optional for tests and HTTP text clients.
+    # Delayed import keeps model SDKs optional for configuration and tests.
     from .minimax import H3Settings
     from .isolated_h3 import IsolatedMiniMaxH3VideoGenerator
 

@@ -17,6 +17,22 @@ from vocagent.providers import (
 from vocagent.selection import HumanInterventionRequired
 
 
+class ProviderContractTests(unittest.TestCase):
+    def test_provider_bundle_requires_all_workflow_dependencies(self):
+        with self.assertRaises(TypeError):
+            Providers()
+        with self.assertRaises(TypeError):
+            Providers(llm=Mock(), text_safety=Mock(), text_quality=Mock())
+
+    def test_video_candidate_validation_requires_positive_integer_slots(self):
+        judge = VideoQualityModel()
+        for count in (0, -1, True, 1.5, "2", None):
+            with self.subTest(count=count), self.assertRaisesRegex(ValueError, "positive integer"):
+                judge.validate_candidate_count(count)
+        judge.validate_candidate_count(1)
+        judge.validate_candidate_count(3)
+
+
 class PipelineTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
@@ -78,6 +94,7 @@ class PipelineTests(unittest.TestCase):
     def test_chosen_candidates_flow_through_the_complete_workflow(self):
         result = self.workflow.run([" apple ", "pear"], self.output)
 
+        self.video_quality.validate_candidate_count.assert_called_once_with(2)
         words = ("apple", "pear")
         quality_calls = self.text_quality.choose.call_args_list
         self.assertEqual(len(quality_calls), 2)

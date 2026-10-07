@@ -1,6 +1,5 @@
-"""Transformers chat contracts, multimodal translation and truncation rejection."""
+"""Transformers chat contracts, native image decoding and truncation rejection."""
 
-import base64
 from contextlib import contextmanager, nullcontext
 import json
 from types import SimpleNamespace
@@ -133,15 +132,14 @@ class LocalChatTests(unittest.TestCase):
         self.assertEqual(len(diagnostic["output_prefix"]), 1024)
         processor.tokenizer.decode.assert_called_once_with([7] * 20, skip_special_tokens=False)
 
-    def test_vision_translation_wraps_system_and_text_messages_and_decodes_real_payload(self):
+    def test_vision_wraps_system_and_text_messages_and_decodes_native_jpeg_bytes(self):
         client = LocalChatClient(Runtime(), "local-model", vision=True)
         module, image = self.image_module()
-        encoded = base64.b64encode(b"jpeg-pixels").decode()
         source = [
             {"role": "system", "content": "Judge the candidates."},
             {"role": "user", "content": [
                 {"type": "text", "text": "Candidate 0, time 0.000 seconds:"},
-                {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64," + encoded}},
+                {"type": "image", "image": b"jpeg-pixels"},
             ]},
             {"role": "user", "content": "Choose one."},
         ]
@@ -154,7 +152,7 @@ class LocalChatTests(unittest.TestCase):
         image.load.assert_called_once()
         image.convert.assert_called_once_with("RGB")
         self.assertIsInstance(source[0]["content"], str)
-        self.assertEqual(source[1]["content"][1]["type"], "image_url")
+        self.assertEqual(source[1]["content"][1]["image"], b"jpeg-pixels")
 
     def test_text_only_qwen_vl_call_still_passes_processor_content_blocks(self):
         client, model, processor, _ = self.setup_chat(vision=True)
@@ -169,24 +167,31 @@ class LocalChatTests(unittest.TestCase):
                 self.assertEqual(block["type"], "text")
         module.Image.open.assert_not_called()
 
-    def test_remote_urls_bad_images_and_huge_payloads_fail_before_loading_weights(self):
-        for url in ("https://example.test/image.jpg", "data:image/png;base64,AAAA",
-                    "data:image/jpeg;base64,***", "data:image/jpeg;base64," + "A" * (4 * ((MAX_IMAGE_BYTES + 2) // 3) + 4)):
+    def test_image_urls_nonbytes_and_huge_payloads_fail_before_loading_weights(self):
+        for block in (
+            {"type": "image_url", "image_url": {"url": "https://example.test/image.jpg"}},
+            {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,AAAA"}},
+            {"type": "image", "image": "data:image/jpeg;base64,AAAA"},
+            {"type": "image", "image": None},
+            {"type": "image", "image": b"A" * (MAX_IMAGE_BYTES + 1)},
+        ):
             runtime = Runtime()
             client = LocalChatClient(runtime, "local-model", vision=True)
             module, _ = self.image_module()
-            with self.subTest(prefix=url[:40]), patch.dict("sys.modules", {"PIL": module}), self.assertRaises(ValueError):
+            with self.subTest(type=block["type"]), patch.dict("sys.modules", {"PIL": module}), self.assertRaises(ValueError):
                 client.complete([{"role": "user", "content": [
-                    {"type": "image_url", "image_url": {"url": url}},
+                    block,
                 ]}], max_tokens=4, temperature=0)
             self.assertEqual(runtime.keys, [])
             module.Image.open.assert_not_called()
+
+    def test_wrong_image_format_and_huge_decoded_pixels_fail_before_loading(self):
         for module, image in (self.image_module(image_format="PNG"),
                               self.image_module(width=MAX_IMAGE_PIXELS + 1, height=1)):
             client = LocalChatClient(Runtime(), "local-model", vision=True)
             with patch.dict("sys.modules", {"PIL": module}), self.assertRaises(ValueError):
                 client._messages([{"role": "user", "content": [
-                    {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,AAAA"}},
+                    {"type": "image", "image": b"jpeg-pixels"},
                 ]}])
             image.load.assert_not_called()
 
@@ -194,7 +199,7 @@ class LocalChatTests(unittest.TestCase):
         client = LocalChatClient(Runtime(), "local-model", vision=True)
         module, _ = self.image_module()
         messages = [{"role": "user", "content": [
-            {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,AAAA"}},
+            {"type": "image", "image": b"jpeg-pixels"},
         ] * (MAX_IMAGES + 1)}]
         with patch.dict("sys.modules", {"PIL": module}), self.assertRaisesRegex(ValueError, "at most"):
             client._messages(messages)

@@ -1,4 +1,4 @@
-"""Replace these stubs with model integrations; no model SDKs are required.
+"""Provider interfaces and the complete set of workflow dependencies.
 
 Generation, safety assessment, and quality selection are separate dependencies.
 Text safety and quality must use agents separate from the generating agent;
@@ -10,7 +10,7 @@ calls on the same instance, up to the stage's configured candidate count (two by
 Quality judging runs after all candidate slots finish.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Sequence
 
@@ -61,6 +61,11 @@ class AudioSafetyModel:
 
 
 class VideoQualityModel:
+    def validate_candidate_count(self, count: int) -> None:
+        """Validate configured slots before generating any video candidates."""
+        if type(count) is not int or count < 1:
+            raise ValueError("Video candidate count must be a positive integer.")
+
     def choose(self, storyboard: str, candidates: Sequence[Path]) -> int:
         """Return the zero-based index of the best safe video."""
         raise NotImplementedError("Implement a specialized VideoQualityModel.choose")
@@ -74,11 +79,14 @@ class SpeechToText:
 
 @dataclass
 class Providers:
-    llm: LLMGenerator = field(default_factory=LLMGenerator)
-    text_safety: TextSafetyAgent = field(default_factory=TextSafetyAgent)
-    text_quality: TextQualityAgent = field(default_factory=TextQualityAgent)
-    video: VideoGenerator = field(default_factory=VideoGenerator)
-    video_safety: VideoSafetyModel = field(default_factory=VideoSafetyModel)
-    video_quality: VideoQualityModel = field(default_factory=VideoQualityModel)
-    speech_to_text: SpeechToText = field(default_factory=SpeechToText)
-    audio_safety: AudioSafetyModel = field(default_factory=AudioSafetyModel)
+    llm: LLMGenerator
+    text_safety: TextSafetyAgent
+    text_quality: TextQualityAgent
+    video: VideoGenerator
+    video_safety: VideoSafetyModel
+    video_quality: VideoQualityModel
+    speech_to_text: SpeechToText
+    audio_safety: AudioSafetyModel
+
+    def close(self) -> None:
+        """Release provider resources; resource-owning bundles override this hook."""

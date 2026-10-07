@@ -68,16 +68,16 @@ Still required:
   The first complete run passed every stage but its speech omitted the requested
   words; this semantic failure is preserved in [its report](validation/full-workflow-1.json).
 
-The previous `serve_hs.sh` starts legacy HTTP text services and is retained only
-for compatibility. It is not used by the new local workflow.
-
 The complete test suite passed on hs: **177 tests, no skips**, including numerical
 convolution checks and real FFmpeg integration. [Test record](validation/tests-hs.json).
-The final local source passes 188 tests (14 dependency/media checks skipped),
-including spoken-vocabulary coverage and early candidate-capacity validation.
-[Local test record](validation/tests-local-final.json). The unskipped test run
-for those final updates is pending restored SSH access. These tests complement the live model probes. The first full workflow passed the
-complete sequence; a corrected run verifies the corrected spoken-vocabulary prompt.
+The current local suite runs 184 tests: 170 pass and 14 checks skip because
+PyTorch and FFmpeg are unavailable. Coverage includes spoken vocabulary,
+early candidate-capacity validation, native image messages, and complete provider
+bundles. The [earlier local test record](validation/tests-local-final.json)
+preserves the validation before the provider cleanup. An unskipped run of the
+current source on hs is pending restored SSH access. These tests complement the
+live model probes. The first full workflow passed the complete sequence; a
+corrected run verifies the corrected spoken-vocabulary prompt.
 
 ## Runtime and model choice
 

@@ -21,8 +21,7 @@ complete recognized-transcript safety; MiniMax H3 for native audio/video;
 Qwen3-ASR-1.7B plus ForcedAligner-0.6B for timestamped speech; and ShieldGemma2
 4B for sampled-frame visual safety. The CLI and Python API default to the full
 video workflow. `--stop-after storyboard` or `stop_after="storyboard"` stops after
-selected text artifacts. The legacy HTTP Qwen factory remains available and
-retains its storyboard-only CLI default.
+selected text artifacts. Provider factories supply every workflow stage.
 
 Local storyboards use H3's native fields, speaker IDs and language-tagged
 dialogue, with a speaking budget based on clip duration. A malformed native
@@ -77,5 +76,6 @@ stop to allow human intervention.
 
 Provider, transcript validation, and FFmpeg errors stop the run instead of being
 treated as unsafe results or retried. New attempts stop while already-started
-attempts finish. The abstract provider classes remain extension interfaces; the default local
-factory supplies concrete implementations for every stage.
+attempts finish. Provider classes define extension interfaces; factories must
+supply every stage, a video candidate-count validator, and a `close()` resource
+hook. The default local factory supplies concrete implementations for every stage.

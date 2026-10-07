@@ -13,7 +13,6 @@ from .selection import HumanInterventionRequired
 
 
 DEFAULT_PROVIDER_FACTORY = "vocagent.local:create_providers"
-LEGACY_TEXT_FACTORY = "vocagent.qwen:create_providers"
 
 
 def positive_integer(value: str) -> int:
@@ -47,8 +46,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--providers", metavar="MODULE:FACTORY",
                         default=DEFAULT_PROVIDER_FACTORY,
                         help="Provider factory (default: vocagent.local:create_providers)")
-    parser.add_argument("--stop-after", choices=("storyboard", "video"),
-                        help="Last stage to run (default: video; legacy HTTP Qwen factory: storyboard)")
+    parser.add_argument("--stop-after", choices=("storyboard", "video"), default="video",
+                        help="Last stage to run (default: video)")
     parser.add_argument("--outline-candidate-count", type=positive_integer, default=2,
                         help="Number of outline candidate slots (default: 2)")
     parser.add_argument("--storyboard-candidate-count", type=positive_integer, default=2,
@@ -58,9 +57,6 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--concurrent-candidates", action="store_true",
                         help="Generate candidate slots concurrently (default: sequential)")
     args = parser.parse_args(argv)
-    stop_after = args.stop_after or (
-        "storyboard" if args.providers == LEGACY_TEXT_FACTORY else "video"
-    )
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
     providers = None
     try:
@@ -71,7 +67,7 @@ def main(argv: list[str] | None = None) -> int:
             storyboard_candidate_count=args.storyboard_candidate_count,
             video_candidate_count=args.video_candidate_count,
             concurrent_candidates=args.concurrent_candidates,
-        ).run(args.vocabulary, args.output_dir, stop_after=stop_after)
+        ).run(args.vocabulary, args.output_dir, stop_after=args.stop_after)
     except HumanInterventionRequired as exc:
         print(f"Human intervention required: {exc}", file=sys.stderr)
         return 2
@@ -80,7 +76,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Workflow stopped: {exc}", file=sys.stderr)
         return 1
     finally:
-        if providers is not None and callable(getattr(providers, "close", None)):
+        if providers is not None:
             providers.close()
     print(result.storyboard if isinstance(result, StoryboardResult) else result.final_video)
     return 0

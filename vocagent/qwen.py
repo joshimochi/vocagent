@@ -5,17 +5,11 @@ https://huggingface.co/Qwen/Qwen3Guard-Gen-8B
 Only a complete, valid Safe verdict passes; errors stop the workflow.
 """
 
-from dataclasses import dataclass, field
-from http.client import HTTPException
 import json
 import math
-import os
 from pathlib import Path
 import re
-from typing import Mapping, Protocol, Sequence
-from urllib.error import HTTPError, URLError
-from urllib.parse import urlsplit
-from urllib.request import Request, urlopen
+from typing import Protocol, Sequence
 
 from .models import SafetyResult
 from .prompts.generation import H3_REPAIR_PROMPT, outline_prompt, storyboard_prompt
@@ -24,104 +18,23 @@ from .prompts.quality import (
 )
 from .prompts.safety import AUDIO_SAFETY_PROMPT, SAFETY_FEEDBACK_PROMPT, TEXT_SAFETY_PROMPT
 from .providers import (
-    AudioSafetyModel, LLMGenerator, Providers, TextQualityAgent, TextSafetyAgent,
+    AudioSafetyModel, LLMGenerator, TextQualityAgent, TextSafetyAgent,
     VideoQualityModel,
 )
 from .video_frames import sample_video_frames
 
 
 class QwenError(RuntimeError):
-    """An endpoint failed or returned an unusable model response."""
+    """A local model failed or returned an unusable response."""
 
 
 class ChatClient(Protocol):
-    """Shared interface for HTTP clients and the on-demand local GPU runtime."""
+    """Chat interface for the on-demand local GPU runtime."""
 
     def complete(
         self, messages: Sequence[dict[str, object]], *, max_tokens: int,
-        temperature: float, non_thinking: bool = False, json_output: bool = False,
+        temperature: float, non_thinking: bool = False,
     ) -> str: ...
-
-
-@dataclass(frozen=True)
-class QwenEndpoint:
-    base_url: str
-    model: str
-    api_key: str = field(default="", repr=False)
-    timeout: float = 120.0
-
-    def __post_init__(self) -> None:
-        parsed = urlsplit(self.base_url)
-        if (parsed.scheme not in ("http", "https") or not parsed.hostname
-                or parsed.username or parsed.password or parsed.query or parsed.fragment):
-            raise ValueError("Qwen base URL must be an HTTP(S) URL without credentials, query or fragment.")
-        if not isinstance(self.model, str) or not self.model.strip():
-            raise ValueError("Qwen model must be a nonempty served model name.")
-        if (isinstance(self.timeout, bool) or not isinstance(self.timeout, (int, float))
-                or not math.isfinite(self.timeout) or self.timeout <= 0):
-            raise ValueError("Qwen timeout must be a finite positive number of seconds.")
-
-
-class QwenChatClient:
-    """Stateless requests allow the workflow to run candidate slots concurrently."""
-
-    def __init__(self, endpoint: QwenEndpoint):
-        self.endpoint = endpoint
-
-    def complete(
-        self, messages: Sequence[dict[str, object]], *, max_tokens: int,
-        temperature: float, non_thinking: bool = False, json_output: bool = False,
-    ) -> str:
-        payload = {
-            "model": self.endpoint.model,
-            "messages": list(messages),
-            "max_tokens": max_tokens,
-            "temperature": temperature,
-            "stream": False,
-        }
-        if non_thinking:
-            payload["chat_template_kwargs"] = {"enable_thinking": False}
-            payload["top_p"] = 0.8
-        if json_output:
-            payload["response_format"] = {"type": "json_object"}
-        headers = {"Content-Type": "application/json", "Accept": "application/json"}
-        if self.endpoint.api_key:
-            headers["Authorization"] = "Bearer " + self.endpoint.api_key
-        request = Request(
-            self.endpoint.base_url.rstrip("/") + "/chat/completions",
-            data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
-            headers=headers,
-            method="POST",
-        )
-        try:
-            with urlopen(request, timeout=self.endpoint.timeout) as response:
-                raw = response.read(4 * 1024 * 1024 + 1)
-        except HTTPError as exc:
-            raise QwenError(f"Qwen endpoint returned HTTP {exc.code} for {self.endpoint.model}.") from exc
-        except (URLError, OSError, HTTPException) as exc:
-            raise QwenError(f"Qwen endpoint request failed for {self.endpoint.model}: {type(exc).__name__}.") from exc
-        if len(raw) > 4 * 1024 * 1024:
-            raise QwenError("Qwen endpoint response exceeded 4 MiB.")
-        try:
-            data = json.loads(raw)
-        except (ValueError, UnicodeDecodeError) as exc:
-            raise QwenError("Qwen endpoint did not return valid JSON.") from exc
-        if not isinstance(data, dict) or data.get("error"):
-            raise QwenError("Qwen endpoint returned an error or invalid response object.")
-        choices = data.get("choices")
-        if not isinstance(choices, list) or len(choices) != 1 or not isinstance(choices[0], dict):
-            raise QwenError("Qwen endpoint must return exactly one completion.")
-        choice = choices[0]
-        if choice.get("finish_reason") != "stop":
-            raise QwenError("Qwen completion did not finish normally; truncated output is rejected.")
-        message = choice.get("message")
-        if (not isinstance(message, dict) or message.get("role") != "assistant"
-                or message.get("tool_calls") or message.get("refusal")):
-            raise QwenError("Qwen endpoint returned an invalid assistant message.")
-        content = message.get("content")
-        if not isinstance(content, str) or not content.strip():
-            raise QwenError("Qwen endpoint returned empty or non-text content.")
-        return content.strip()
 
 
 def _validate_h3_storyboard(result: str) -> None:
@@ -169,8 +82,8 @@ def _validate_h3_storyboard(result: str) -> None:
 
 
 class QwenGenerator(LLMGenerator):
-    def __init__(self, client: ChatClient, *, storyboard_seconds: float | None = None):
-        if storyboard_seconds is not None and (
+    def __init__(self, client: ChatClient, *, storyboard_seconds: float):
+        if (
             isinstance(storyboard_seconds, bool) or not isinstance(storyboard_seconds, (int, float))
             or not math.isfinite(storyboard_seconds) or storyboard_seconds <= 0
         ):
@@ -180,32 +93,30 @@ class QwenGenerator(LLMGenerator):
 
     def generate_outline(self, vocabulary: Sequence[str], feedback: str | None) -> str:
         prompt = outline_prompt(self.storyboard_seconds)
-        inputs = {"vocabulary": list(vocabulary)}
-        if self.storyboard_seconds is not None:
-            inputs["duration_seconds"] = self.storyboard_seconds
+        inputs = {"vocabulary": list(vocabulary), "duration_seconds": self.storyboard_seconds}
         return self._generate(prompt, inputs, feedback, 1024)
 
     def generate_storyboard(
         self, vocabulary: Sequence[str], outline: str, feedback: str | None,
     ) -> str:
-        inputs = {"vocabulary": list(vocabulary), "outline": outline}
+        inputs = {
+            "vocabulary": list(vocabulary), "outline": outline,
+            "duration_seconds": self.storyboard_seconds,
+        }
         prompt = storyboard_prompt(self.storyboard_seconds)
-        if self.storyboard_seconds is not None:
-            inputs["duration_seconds"] = self.storyboard_seconds
         result = self._generate(prompt, inputs, feedback, 2048)
-        if self.storyboard_seconds is not None:
-            # Missing speech tags caused H3 to improvise unrelated dialogue in a
-            # real run. Permit one format repair, then reject any unusable prompt
-            # before expensive video inference. Backend errors are never retried.
-            try:
-                _validate_h3_storyboard(result)
-            except QwenError as exc:
-                repair_inputs = {
-                    **inputs, "previous_storyboard": result, "format_error": str(exc),
-                }
-                repair_prompt = prompt + H3_REPAIR_PROMPT
-                result = self._generate(repair_prompt, repair_inputs, feedback, 2048)
-                _validate_h3_storyboard(result)
+        # Missing speech tags caused H3 to improvise unrelated dialogue in a
+        # real run. Permit one format repair, then reject any unusable prompt
+        # before expensive video inference. Backend errors are never retried.
+        try:
+            _validate_h3_storyboard(result)
+        except QwenError as exc:
+            repair_inputs = {
+                **inputs, "previous_storyboard": result, "format_error": str(exc),
+            }
+            repair_prompt = prompt + H3_REPAIR_PROMPT
+            result = self._generate(repair_prompt, repair_inputs, feedback, 2048)
+            _validate_h3_storyboard(result)
         return result
 
     def _generate(self, prompt: str, inputs: dict, feedback: str | None, max_tokens: int) -> str:
@@ -307,7 +218,7 @@ class QwenQuality(TextQualityAgent):
                  "candidates": [{"index": index, "text": text}
                                 for index, text in enumerate(candidates)],
              }, ensure_ascii=False)}],
-            max_tokens=128, temperature=0, non_thinking=True, json_output=True,
+            max_tokens=128, temperature=0, non_thinking=True,
         )
         return _selection_index(content, len(candidates))
 
@@ -327,14 +238,12 @@ def _selection_index(content: str, candidate_count: int) -> int:
 class QwenVideoQuality(VideoQualityModel):
     """Judge actual pixels using bounded, timestamped frame sequences.
 
-    Standard image_url data URLs work for both vLLM chat and its HTTP API:
-    https://docs.vllm.ai/en/latest/features/multimodal_inputs/
     Sampling provides visual evidence, but does not inspect every video frame.
     """
 
     def __init__(
         self, client: ChatClient, *, max_frames: int = 16, max_side: int = 768,
-        max_total_frames: int = 64,
+        max_total_frames: int = 32,
     ):
         if type(max_frames) is not int or not 1 <= max_frames <= 64:
             raise ValueError("Video quality max_frames must be an integer from 1 to 64.")
@@ -381,36 +290,11 @@ class QwenVideoQuality(VideoQualityModel):
                     {"type": "text", "text": VIDEO_FRAME_TEMPLATE.format(
                         index=index, timestamp=frame.timestamp,
                     )},
-                    {"type": "image_url", "image_url": {"url": frame.data_url}},
+                    {"type": "image", "image": frame.jpeg},
                 ])
         result = self.client.complete(
             [{"role": "system", "content": VIDEO_QUALITY_PROMPT},
              {"role": "user", "content": content}],
-            max_tokens=128, temperature=0, non_thinking=True, json_output=True,
+            max_tokens=128, temperature=0, non_thinking=True,
         )
         return _selection_index(result, len(candidates))
-
-
-def create_providers(environ: Mapping[str, str] | None = None) -> Providers:
-    """Configure text stages; later video and speech stages remain explicit stubs."""
-    env = os.environ if environ is None else environ
-
-    def endpoint(prefix: str, port: int, model: str) -> QwenEndpoint:
-        try:
-            timeout = float(env.get(prefix + "_TIMEOUT_SECONDS", "120"))
-        except (TypeError, ValueError) as exc:
-            raise ValueError(f"{prefix}_TIMEOUT_SECONDS must be a finite positive number.") from exc
-        return QwenEndpoint(
-            base_url=env.get(prefix + "_BASE_URL", f"http://127.0.0.1:{port}/v1"),
-            model=env.get(prefix + "_MODEL", model),
-            api_key=env.get(prefix + "_API_KEY", ""),
-            timeout=timeout,
-        )
-
-    text_endpoint = endpoint("QWEN", 8000, "qwen3")
-    guard_endpoint = endpoint("QWEN_GUARD", 8001, "qwen3-guard")
-    return Providers(
-        llm=QwenGenerator(QwenChatClient(text_endpoint)),
-        text_safety=QwenGuard(QwenChatClient(guard_endpoint)),
-        text_quality=QwenQuality(QwenChatClient(text_endpoint)),
-    )

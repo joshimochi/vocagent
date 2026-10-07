@@ -67,9 +67,7 @@ class Workflow:
             raise ValueError("Every vocabulary item must be a nonempty string.")
         words = tuple(word.strip() for word in vocabulary)
         if stop_after == "video":
-            validator = getattr(self.providers.video_quality, "validate_candidate_count", None)
-            if callable(validator):
-                validator(self.video_candidate_count)
+            self.providers.video_quality.validate_candidate_count(self.video_candidate_count)
         output = Path(output_dir).resolve()
         if output.exists() and (not output.is_dir() or any(output.iterdir())):
             raise ValueError("Output directory must be new or empty to protect existing files.")

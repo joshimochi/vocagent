@@ -112,8 +112,8 @@ def main(argv=None):
     for video in videos:
         if not video.is_file():
             parser.error(f"Video does not exist: {video}")
-    if not 2 <= args.max_frames <= 32:
-        parser.error("max-frames must be between 2 and 32 for two multi-image candidates")
+    if not 2 <= args.max_frames <= 16:
+        parser.error("max-frames must be between 2 and 16 for the 32-frame candidate budget")
     args.report.parent.mkdir(parents=True, exist_ok=True)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s VL probe %(message)s")
     runtime = GPURuntime(args.backend)

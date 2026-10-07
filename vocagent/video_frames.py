@@ -1,6 +1,5 @@
 """Bounded local video sampling shared by visual quality and safety providers."""
 
-import base64
 from dataclasses import dataclass
 from fractions import Fraction
 import json
@@ -15,10 +14,6 @@ from .media import MediaError, _input_file
 class VideoFrame:
     timestamp: float
     jpeg: bytes
-
-    @property
-    def data_url(self) -> str:
-        return "data:image/jpeg;base64," + base64.b64encode(self.jpeg).decode("ascii")
 
 
 def _run(arguments: list[str], timeout: float = 60) -> bytes:

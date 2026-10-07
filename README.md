@@ -33,7 +33,7 @@ bash deploy/run_hs.sh sunrise curious journey \
   --output-dir /data/group6/vocagent/outputs/example
 ```
 
-The CLI now defaults to a complete subtitled video. `--stop-after storyboard`
+The CLI defaults to a complete subtitled video. `--stop-after storyboard`
 stops after the selected text artifacts. The output directory must be new or
 empty. Candidate counts default to two per stage:
 
@@ -43,7 +43,7 @@ bash deploy/run_hs.sh sunrise curious journey \
   --video-candidate-count 2 --output-dir /data/group6/vocagent/outputs/example-2
 ```
 
-The Python API remains:
+The Python API:
 
 ```python
 from vocagent.local import create_providers
@@ -106,9 +106,8 @@ above 0.5 rejects the candidate. Sampling cannot guarantee detection of brief
 events between samples. Clips exceeding the sampling budget are rejected with an
 error rather than silently shortening coverage. VL video judging samples up to
 16 frames per candidate. The local 16K-context configuration allows two video
-candidate slots (32 frames total), validated before any generation. The legacy
-HTTP adapter permits up to 64 frames. Video judging evaluates visible evidence;
-it does not listen to audio. Spoken vocabulary matching uses normalized complete
+candidate slots (32 frames total), validated before any generation. Video judging
+evaluates visible evidence; it does not listen to audio. Spoken vocabulary matching uses normalized complete
 words or phrases, allowing case and punctuation differences. It does not infer
 synonyms, homophones, translations, or inflected forms.
 
@@ -149,12 +148,9 @@ render based on the measured single iteration; the default worker limit is four
 hours and can be overridden. Many vocabulary
 items may not fit naturally in a single clip; choose a small vocabulary set.
 
-The legacy HTTP-only factory `vocagent.qwen:create_providers` is retained for
-existing text endpoints and defaults to `storyboard` when explicitly selected.
-Its `QWEN_BASE_URL`, `QWEN_MODEL`, `QWEN_GUARD_BASE_URL`, `QWEN_GUARD_MODEL`,
-optional API-key and timeout variables retain their previous behavior. It still
-requires custom video providers to continue past storyboard. New local runs do
-not need API endpoints, keys, or SSH tunnels.
+Provider factories must return a complete `Providers` bundle for all workflow
+stages. Local runs use checkpoint directories and do not need API endpoints,
+keys, or SSH tunnels.
 
 ## Outputs and tests
 
@@ -168,7 +164,7 @@ python3 -m unittest discover -s tests -v
 ```
 
 Core workflow tests need only Python 3.10+. Real media tests require FFmpeg and
-FFprobe with libass, H.264, and AAC. Numerical H3 compatibility tests require
+FFprobe with libass, H.264, and AAC. Numerical H3 equivalence tests require
 PyTorch; real model smoke tests require the `hs` environments and checkpoints.
 Fake-provider tests alone do not establish model/runtime compatibility.
 
