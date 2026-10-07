@@ -59,7 +59,8 @@ def select_candidate(
     The generator receives a one-based slot and attempt, plus the previous
     unsafe reason when feedback is enabled. The quality judge receives only
     the safe survivors in slot order and returns a zero-based index into that
-    sequence. Slots run sequentially by default. With concurrent_candidates=True,
+    sequence. A sole survivor is returned without quality judging.
+    Slots run sequentially by default. With concurrent_candidates=True,
     generation and safety callbacks must support up to candidate_count concurrent calls.
     Optional check_content runs only after safety passes and returns None to
     accept or a nonempty rejection reason. Content and safety rejections share
@@ -121,6 +122,9 @@ def select_candidate(
             f"{stage}: no acceptable candidate after {candidate_count} slots with four attempts "
             "each; human intervention is required."
         )
+
+    if len(accepted) == 1:
+        return accepted[0]
 
     index = validate_selection_index(choose_best(tuple(accepted)), len(accepted), stage)
     return accepted[index]

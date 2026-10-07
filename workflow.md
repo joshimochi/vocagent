@@ -48,7 +48,8 @@ deploy/README.md for the deployment status.
 
 For the outline, storyboard, and video stages, fill the configured number of
 candidate slots with generation/safety/content attempts, then let a separate quality
-judge choose from the safe candidates in slot order, even if only one survived.
+judge choose from the safe candidates in slot order when multiple candidates
+survive. If only one candidate survives, use it directly without a selection call.
 
 Configure the stages independently with `outline_candidate_count`,
 `storyboard_candidate_count`, and `video_candidate_count`. Each must be a positive

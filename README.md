@@ -130,7 +130,8 @@ Each candidate slot gets at most four generation/safety/content attempts. Unsafe
 supplies feedback to the next attempt. Rejected video attempts and their audio
 and transcript files are deleted and regenerated without feedback. Candidates
 passing safety and spoken-vocabulary coverage are retained; an exhausted slot is ignored. A separate quality judge
-still runs when only one candidate survives. If none survive, the workflow
+runs when multiple candidates survive; a sole survivor is used directly without
+a selection call. If none survive, the workflow
 raises `HumanInterventionRequired`.
 
 Provider errors, missing speech, incomplete alignment, malformed moderation,

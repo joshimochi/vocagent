@@ -143,6 +143,41 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(total["model_load_seconds"], 0)
         self.assertEqual(total["model_run_seconds"], 0)
 
+    def test_single_candidate_stages_skip_quality_selection_and_benchmarks(self):
+        self.text_quality.choose.side_effect = RuntimeError("text quality unavailable")
+        self.video_quality.choose.side_effect = RuntimeError("video quality unavailable")
+        for concurrent_candidates in (False, True):
+            with self.subTest(concurrent_candidates=concurrent_candidates):
+                workflow = Workflow(
+                    self.providers, self.media,
+                    outline_candidate_count=1,
+                    storyboard_candidate_count=1,
+                    video_candidate_count=1,
+                    concurrent_candidates=concurrent_candidates,
+                )
+                output = self.output / ("concurrent" if concurrent_candidates else "sequential")
+                result = workflow.run("apple", output)
+
+                self.text_quality.choose.assert_not_called()
+                self.video_quality.choose.assert_not_called()
+                for stage, path in (("outline", result.outline), ("storyboard", result.storyboard)):
+                    candidate = output / f"{stage}_candidates" / "candidate-1-attempt-1.txt"
+                    self.assertEqual(path.read_text(), candidate.read_text())
+                self.assertEqual(
+                    result.selected_video,
+                    output / "video_candidates" / "candidate-1-attempt-1.mp4",
+                )
+                self.assertTrue(result.final_video.is_file())
+                report = json.loads(result.benchmarks.read_text(encoding="utf-8"))
+                self.assertEqual(report["status"], "completed")
+                steps = {step["name"]: step for step in report["steps"]}
+                for stage in ("outline", "storyboard", "video"):
+                    self.assertEqual(steps[f"{stage}.generation"]["calls"], 1)
+                    self.assertEqual(steps[f"{stage}.safety"]["calls"], 1)
+                    self.assertNotIn(f"{stage}.selection", steps)
+                self.assertEqual(steps["audio.safety"]["calls"], 1)
+                self.assertEqual(steps["vocabulary.validation"]["outcomes"], {"passed": 1})
+
     def test_chosen_candidates_flow_through_the_complete_workflow(self):
         result = self.workflow.run(" apple ", self.output)
 
@@ -421,13 +456,13 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(self.llm.generate_outline.call_count, 1)
         self.assertEqual(self.llm.generate_storyboard.call_count, 3)
         self.assertEqual(self.video.generate.call_count, 5)
-        outline_call, storyboard_call = self.text_quality.choose.call_args_list
-        self.assertEqual(len(outline_call.args[2]), 1)
+        storyboard_call, = self.text_quality.choose.call_args_list
+        self.assertEqual(storyboard_call.args[:2], ("storyboard", ("apple",)))
         self.assertEqual(len(storyboard_call.args[2]), 3)
-        self.assertEqual(result.outline.read_text(), outline_call.args[2][-1])
+        self.assertEqual(result.outline.read_text(), "outline 1")
         self.assertEqual(result.storyboard.read_text(), storyboard_call.args[2][-1])
         for stage, candidates in (
-            ("outline", outline_call.args[2]), ("storyboard", storyboard_call.args[2]),
+            ("outline", ("outline 1",)), ("storyboard", storyboard_call.args[2]),
         ):
             self.assertEqual({
                 path.name: path.read_text(encoding="utf-8")

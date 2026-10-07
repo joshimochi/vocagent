@@ -116,7 +116,7 @@ class SelectionTests(unittest.TestCase):
         self.assertEqual(generate.call_count, 4)
         self.assertTrue(all(call.args[2] is None for call in generate.call_args_list))
 
-    def test_content_rejections_share_safety_budget_and_only_survivors_are_judged(self):
+    def test_content_rejections_share_safety_budget_and_single_survivor_skips_judging(self):
         generate = Mock(side_effect=lambda slot, attempt, feedback: (slot, attempt))
         content = Mock(side_effect=lambda candidate: None if candidate[1] == 4 else "missing word")
         judge = Mock(return_value=0)
@@ -129,7 +129,7 @@ class SelectionTests(unittest.TestCase):
         self.assertEqual(generate.call_count, 4)
         self.assertEqual([call.args[0] for call in content.call_args_list], [(1, 2), (1, 3), (1, 4)])
         self.assertTrue(all(call.args[2] is None for call in generate.call_args_list))
-        judge.assert_called_once_with(((1, 4),))
+        judge.assert_not_called()
 
     def test_all_content_failures_exhaust_budget_without_quality_judging(self):
         generate = Mock(return_value="candidate")
@@ -164,7 +164,7 @@ class SelectionTests(unittest.TestCase):
                 generate.assert_called_once_with(1, 1, None)
                 judge.assert_not_called()
 
-    def test_exhausted_slots_are_ignored_and_single_survivor_is_judged(self):
+    def test_exhausted_slots_are_ignored_and_single_survivor_skips_judging(self):
         generate = Mock(side_effect=lambda slot, attempt, feedback: (slot, attempt))
         judge = Mock(return_value=0)
 
@@ -176,7 +176,7 @@ class SelectionTests(unittest.TestCase):
 
         self.assertEqual(result, (2, 4))
         self.assertEqual(generate.call_count, 8)
-        judge.assert_called_once_with(((2, 4),))
+        judge.assert_not_called()
         for slot in range(1, 3):
             slot_calls = [call.args for call in generate.call_args_list if call.args[0] == slot]
             self.assertEqual([call[1] for call in slot_calls], [1, 2, 3, 4])
@@ -254,11 +254,12 @@ class SelectionTests(unittest.TestCase):
                     )
 
     def test_quality_index_is_checked_against_survivors_not_original_slots(self):
-        with self.assertRaisesRegex(ValueError, "0 to 0"):
+        with self.assertRaisesRegex(ValueError, "0 to 1"):
             select_candidate(
-                stage="video", generate=lambda slot, attempt, feedback: slot,
-                check_safety=lambda candidate: SafetyResult(candidate == 2),
-                choose_best=lambda candidates: 1, pass_feedback=False,
+                stage="video", candidate_count=3,
+                generate=lambda slot, attempt, feedback: slot,
+                check_safety=lambda candidate: SafetyResult(candidate > 1),
+                choose_best=lambda candidates: 2, pass_feedback=False,
             )
 
     def test_generation_errors_propagate_without_safety_retry(self):
