@@ -108,10 +108,8 @@ threads can preprocess in parallel, but model inference remains serialized.
    aligned timestamps in the saved transcript and subtitle cues.
 5. Check visual frames with ShieldGemma 2 and the **complete recognized
    transcript** with Qwen3Guard. Both checks must pass.
-6. Require the target word in the actual ASR transcript. A missing
-   target word rejects the clip and uses the same bounded retry budget.
-7. Use Qwen3-VL to select among accepted videos from actual, timestamped image frames.
-8. Reuse the selected transcript; write ASS subtitles and burn them into the
+6. Use Qwen3-VL to select among accepted videos from actual, timestamped image frames.
+7. Reuse the selected transcript; write ASS subtitles and burn them into the
    selected video with FFmpeg, preserving its audio.
 
 ShieldGemma 2 is an **image** safety classifier, applied throughout the video at
@@ -122,14 +120,13 @@ events between samples. Clips exceeding the sampling budget are rejected with an
 error rather than silently shortening coverage. VL video judging samples up to
 16 frames per candidate. The local 16K-context configuration allows two video
 candidate slots (32 frames total), validated before any generation. Video judging
-evaluates visible evidence; it does not listen to audio. Spoken target-word matching uses normalized complete
-words, allowing case and punctuation differences. It does not infer
-synonyms, homophones, translations, or inflected forms.
+evaluates visible evidence; it does not listen to audio. ASR provides recognized
+speech for transcript safety and subtitles.
 
-Each candidate slot gets at most four generation/safety/content attempts. Unsafe text
+Each candidate slot gets at most four generation/safety attempts. Unsafe text
 supplies feedback to the next attempt. Rejected video attempts and their audio
 and transcript files are deleted and regenerated without feedback. Candidates
-passing safety and spoken-vocabulary coverage are retained; an exhausted slot is ignored. A separate quality judge
+passing safety are retained; an exhausted slot is ignored. A separate quality judge
 runs when multiple candidates survive; a sole survivor is used directly without
 a selection call. If none survive, the workflow
 raises `HumanInterventionRequired`.
@@ -185,7 +182,7 @@ or quality-selection failure.
 
 Every started workflow writes `benchmark.json`, including storyboard-only runs
 and failed runs. `result.benchmarks` points to the report. It records each
-generation, safety check, vocabulary check, selection, audio extraction, and
+generation, safety check, selection, audio extraction, and
 subtitle operation, with candidate slot and attempt numbers for retries. The
 report contains per-call measurements, per-step aggregates, and a total for the
 workflow, including status and any failure. Input and output preflight failures

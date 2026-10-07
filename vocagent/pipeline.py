@@ -14,7 +14,7 @@ from .models import SafetyResult, StoryboardResult, TranscriptSegment, WorkflowR
 from .providers import Providers
 from .selection import select_candidate, validate_safety_result, validate_selection_index
 from .subtitles import validate_segments, write_ass
-from .vocabulary import missing_vocabulary, normalize_target_word
+from .vocabulary import normalize_target_word
 
 
 log = logging.getLogger(__name__)
@@ -232,23 +232,6 @@ class Workflow:
                 return visual if not visual.safe else audio
             return SafetyResult(True)
 
-        def check_spoken_vocabulary(candidate: _VideoCandidate) -> str | None:
-            with benchmark.step("vocabulary.validation", **candidate_metadata.get()) as step:
-                missing = missing_vocabulary(words, "\n".join(
-                    segment.text for segment in candidate.segments
-                ))
-                step.add_work(vocabulary_items=len(words), missing_vocabulary_items=len(missing))
-                step.outcome("rejected" if missing else "passed")
-            if not missing:
-                return None
-            reason = "Recognized speech is missing requested vocabulary: " + ", ".join(
-                repr(word) for word in missing
-            )
-            log.warning("Rejected %s for content: %s", candidate.video.name, reason)
-            for path in (candidate.video, candidate.audio, candidate.transcript):
-                path.unlink()
-            return reason
-
         def choose_video(candidates: Sequence[_VideoCandidate]) -> int:
             with benchmark.step("video.selection", candidate_count=len(candidates)):
                 return validate_selection_index(
@@ -263,7 +246,6 @@ class Workflow:
             candidate_count=self.video_candidate_count,
             generate=generate_video,
             check_safety=check_video,
-            check_content=check_spoken_vocabulary,
             choose_best=choose_video,
             pass_feedback=False,
             concurrent_candidates=self.concurrent_candidates,

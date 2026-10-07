@@ -11,9 +11,7 @@
    - Validate the segments and save the audio and transcript beside the video.
    - Check visuals with `VideoSafetyModel` and spoken content with a separate
      `AudioSafetyModel`, passing the segment texts joined with newlines.
-   - After both safety models pass, require the target word in the actual
-     recognized speech, using normalized complete-word matching.
-   - Keep the candidate only when both safety and spoken-vocabulary checks pass.
+   - Keep the candidate when both safety models pass.
 5. Choose the best safe video with `VideoQualityModel`.
 6. Copy the selected candidate's existing audio and transcript to `audio.wav`
    and `transcript.json`, and create ASS subtitles from its original segments.
@@ -42,12 +40,12 @@ before loading its replacement. It rejects CPU/disk offloading. H3 runs in a
 separate dependency environment after the parent releases its model weights.
 ShieldGemma is an image classifier applied at 2fps, including the clip tail;
 sampled-frame checks do not guarantee observation of brief events between frames.
-Model/runtime checks passed on hs; final spoken-vocabulary validation is in
+Model/runtime checks passed on hs; final content validation is in
 progress, and the single-word changes still need hs validation. See
 deploy/README.md for the deployment status.
 
 For the outline, storyboard, and video stages, fill the configured number of
-candidate slots with generation/safety/content attempts, then let a separate quality
+candidate slots with generation/safety attempts, then let a separate quality
 judge choose from the safe candidates in slot order when multiple candidates
 survive. If only one candidate survives, use it directly without a selection call.
 

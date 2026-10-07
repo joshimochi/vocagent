@@ -2,9 +2,9 @@
 
 ## Current status — 2026-10-07
 
-**The technical pipeline and native H3 capacity checks passed; final spoken-vocabulary validation is in progress.** Source changes
+**The technical pipeline and native H3 capacity checks passed; final content validation is in progress.** Source changes
 for the model adapters have been uploaded to `/data/group6/vocagent/run-a406/app`.
-The final logging, vocabulary-coverage, and early-capacity updates are verified
+The final logging and early-capacity updates are verified
 locally and awaiting synchronization while SSH is unavailable. Network connectivity
 to `hs` is intermittent: SSH connections frequently time out, including an
 established interactive session. Detached validation jobs use locks and log files
@@ -12,6 +12,8 @@ so connection loss does not duplicate model loads.
 
 The current source accepts exactly one English target word and focuses its
 English outline, storyboard, and dialogue on one clear meaning of that word.
+Exact target-word matching in recognized speech has been removed; ASR supplies
+transcript safety review and subtitles.
 These source and prompt changes still need upload and validation on `hs`; the
 completed checks and ongoing remote run below used the earlier vocabulary-input
 behavior.
@@ -77,9 +79,11 @@ Still required:
 
 The complete test suite passed on hs: **177 tests, no skips**, including numerical
 convolution checks and real FFmpeg integration. [Test record](validation/tests-hs.json).
-The current local suite passes **208 tests: 194 passed and 14 skipped** because
-PyTorch and FFmpeg are unavailable. Coverage includes single-word input validation,
-English prompts and speech configuration, spoken vocabulary,
+The current local suite ran with `TMPDIR=/private/tmp`: **205 tests: 201 passed,
+3 failed, and 1 skipped**. The media-installer failures are due to the missing
+`flock` utility on macOS. All 39 workflow and input-validation tests pass.
+Coverage includes single-word input validation, English prompts and speech
+configuration, acceptance of safe transcripts without the exact target word,
 early candidate-capacity validation, native image messages, and complete provider
 bundles, plus plain storyboard generation without format repair. The
 [earlier local test record](validation/tests-local-final.json)
