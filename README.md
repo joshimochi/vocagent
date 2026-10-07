@@ -141,7 +141,7 @@ All model paths are local directories. `VOCAGENT_DEPLOY_ROOT` defaults to
 | `MINIMAX_H3_STEPS` | `50` |
 | `MINIMAX_H3_TIMEOUT_SECONDS` | `14400` per video candidate |
 
-H3 output is fixed at a width of 768, a height of 1344, and a requested duration
+H3 output is fixed in landscape at a width of 1344, a height of 768, and a requested duration
 of 15 seconds. Duration is rounded to its native video-frame grid within the
 15-second limit (345 frames at 24 fps, or 14.375 seconds). Outline and storyboard
 prompts use the same 15-second budget. These settings are hardcoded.

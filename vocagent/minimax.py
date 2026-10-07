@@ -18,10 +18,10 @@ log = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class H3Settings:
-    """Fixed portrait video shape and duration with configurable sigma points."""
+    """Fixed landscape video shape and duration with configurable sigma points."""
 
-    width: ClassVar[int] = 768
-    height: ClassVar[int] = 1344
+    width: ClassVar[int] = 1344
+    height: ClassVar[int] = 768
     seconds: ClassVar[float] = 15
     steps: int = 50
 
