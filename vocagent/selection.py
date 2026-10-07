@@ -7,6 +7,7 @@ from threading import Event
 from typing import TypeVar
 
 from .models import SafetyResult
+from .prompts.safety import SAFETY_RETRY_FEEDBACK
 
 
 T = TypeVar("T")
@@ -85,10 +86,7 @@ def select_candidate(
                         "%s slot %d attempt %d rejected: %r", stage, slot, attempt,
                         safety.reason or "Safety checker supplied no reason.",
                     )
-                    reason = safety.reason if safety.reason.strip() else (
-                        "The previous candidate failed the safety check. "
-                        "Generate a safer alternative."
-                    )
+                    reason = safety.reason if safety.reason.strip() else SAFETY_RETRY_FEEDBACK
                 if pass_feedback:
                     feedback = reason
         except Exception:

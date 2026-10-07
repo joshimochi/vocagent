@@ -10,6 +10,7 @@ import time
 
 from .gpu_runtime import GPURuntime
 from .local_chat import LocalChatClient
+from .prompts.diagnostics import ARITHMETIC_PROMPT
 from .qwen import QwenQuality, QwenVideoQuality
 
 
@@ -137,7 +138,7 @@ def main(argv=None):
 
     cases = [
         ("short_text", "4", lambda: client.complete(
-            [{"role": "user", "content": "What is two plus two? Answer with only the number."}],
+            [{"role": "user", "content": ARITHMETIC_PROMPT}],
             max_tokens=32, temperature=0, non_thinking=True)),
         ("text_selection", 0, lambda: QwenQuality(client).choose(
             "outline", ("curious", "bridge"), (

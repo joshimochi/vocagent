@@ -4,6 +4,10 @@ A vocabulary-to-video agent with separate generation, safety, and selection call
 The default provider factory is `vocagent.local:create_providers`, intended to run
 entirely on `hs`, using physical GPUs **4–7** (four MTT S4000, 48 GiB each).
 
+Model prompts live in [`vocagent/prompts/`](vocagent/prompts/), grouped into
+generation, safety, quality selection, and diagnostics modules. Edit the prompt
+text and duration-specific builders there.
+
 | Task | Local checkpoint |
 | --- | --- |
 | Outline, storyboard, text selection, visual video selection | Qwen/Qwen3-VL-32B-Instruct, BF16 |
