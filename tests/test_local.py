@@ -22,6 +22,9 @@ class LocalFactoryTests(unittest.TestCase):
             providers = create_providers({
                 'VOCAGENT_DEPLOY_ROOT': directory,
                 'MINIMAX_H3_TIMEOUT_SECONDS': '14400',
+                'MINIMAX_H3_WIDTH': 'ignored',
+                'MINIMAX_H3_HEIGHT': 'ignored',
+                'MINIMAX_H3_SECONDS': 'ignored',
             })
             self.assertIsInstance(providers.llm.client, LocalChatClient)
             self.assertIsInstance(providers.video, MiniMaxH3VideoGenerator)
@@ -35,6 +38,10 @@ class LocalFactoryTests(unittest.TestCase):
                 self.assertIs(provider.client.runtime, providers.runtime)
             self.assertIs(providers.video.runtime, providers.runtime)
             self.assertEqual(providers.video.timeout, 14400)
+            self.assertEqual(providers.video.settings.width, 768)
+            self.assertEqual(providers.video.settings.height, 1344)
+            self.assertEqual(providers.video.settings.seconds, 15)
+            self.assertEqual(providers.llm.storyboard_seconds, providers.video.settings.seconds)
             providers.video_quality.validate_candidate_count(2)
             with self.assertRaisesRegex(ValueError, 'at most 2 candidate slots'):
                 providers.video_quality.validate_candidate_count(3)

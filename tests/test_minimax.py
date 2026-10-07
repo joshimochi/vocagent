@@ -14,17 +14,17 @@ from vocagent.minimax import (
 
 class H3SettingsTests(unittest.TestCase):
     def test_frame_count_obeys_vae_grid_and_duration_limits(self):
-        for duration in (5, 5.1, 8, 10, 14.9, 15):
-            frames = H3Settings(seconds=duration).num_frames
-            self.assertEqual((frames - 5) % 17, 0)
-            self.assertGreaterEqual(frames / 24, 5)
-            self.assertLessEqual(frames / 24, 15)
+        frames = H3Settings().num_frames
+        self.assertEqual((frames - 5) % 17, 0)
+        self.assertLessEqual(frames / 24, 15)
+        self.assertGreater((frames + 17) / 24, 15)
 
-    def test_invalid_dimensions_and_duration_fail_before_loading(self):
-        for settings in ({"width": 1350}, {"height": 0}, {"seconds": float("nan")},
-                         {"seconds": 16}, {"steps": 1}):
-            with self.subTest(settings=settings), self.assertRaises(ValueError):
+    def test_dimensions_and_duration_cannot_be_configured(self):
+        for settings in ({"width": 1344}, {"height": 768}, {"seconds": 10}):
+            with self.subTest(settings=settings), self.assertRaises(TypeError):
                 H3Settings(**settings)
+        with self.assertRaises(ValueError):
+            H3Settings(steps=1)
 
     def test_insufficient_gpu_capacity_never_dispatches_to_cpu(self):
         accelerate = SimpleNamespace(infer_auto_device_map=Mock(return_value={"": "cpu"}),

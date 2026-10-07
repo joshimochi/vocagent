@@ -41,9 +41,6 @@ def create_providers(environ: Mapping[str, str] | None = None) -> Providers:
     from .isolated_h3 import IsolatedMiniMaxH3VideoGenerator
 
     settings = H3Settings(
-        width=int(env.get("MINIMAX_H3_WIDTH", "1344")),
-        height=int(env.get("MINIMAX_H3_HEIGHT", "768")),
-        seconds=float(env.get("MINIMAX_H3_SECONDS", "10")),
         steps=int(env.get("MINIMAX_H3_STEPS", "50")),
     )
     return LocalProviders(

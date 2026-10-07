@@ -7,6 +7,7 @@ from pathlib import Path
 import secrets
 import tempfile
 import types
+from typing import ClassVar
 
 from .providers import VideoGenerator
 from .gpu_boundaries import align_h3_residual_outputs
@@ -17,16 +18,14 @@ log = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class H3Settings:
-    width: int = 1344
-    height: int = 768
-    seconds: float = 10
+    """Fixed portrait video shape and duration with configurable sigma points."""
+
+    width: ClassVar[int] = 768
+    height: ClassVar[int] = 1344
+    seconds: ClassVar[float] = 15
     steps: int = 50
 
     def __post_init__(self):
-        if self.width < 64 or self.height < 64 or self.width % 32 or self.height % 32:
-            raise ValueError("H3 dimensions must be multiples of 32 and at least 64.")
-        if not math.isfinite(self.seconds) or not 5 <= self.seconds <= 15:
-            raise ValueError("H3 duration must be between 5 and 15 seconds.")
         if self.steps < 2:
             raise ValueError("H3 requires at least two sigma points.")
 

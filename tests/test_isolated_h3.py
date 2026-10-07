@@ -11,6 +11,7 @@ from unittest.mock import Mock, patch
 
 from vocagent.isolated_h3 import IsolatedMiniMaxH3VideoGenerator
 from vocagent.h3_worker import main as worker_main
+from vocagent.minimax import H3Settings
 
 
 class IsolatedH3Tests(unittest.TestCase):
@@ -29,7 +30,9 @@ class IsolatedH3Tests(unittest.TestCase):
 
     def test_native_worker_runs_inside_lock_with_literal_unicode_request(self):
         runtime, state = self.runtime()
-        provider = IsolatedMiniMaxH3VideoGenerator(runtime, "/models/H3", python_executable="/env/bin/python")
+        provider = IsolatedMiniMaxH3VideoGenerator(
+            runtime, "/models/H3", python_executable="/env/bin/python", settings=H3Settings(steps=12),
+        )
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / 'clip.mp4'
 
@@ -39,6 +42,8 @@ class IsolatedH3Tests(unittest.TestCase):
                 request = json.loads(Path(command[3]).read_text())
                 self.assertEqual(request['storyboard'], '说 hello; $(not-a-command)')
                 self.assertEqual(request['backend'], 'musa')
+                self.assertEqual(request['settings'], {'steps': 12})
+                self.assertEqual(H3Settings(**request['settings']), provider.settings)
                 self.assertNotIn('shell', kwargs)
                 self.assertNotEqual(Path(request['output']), output)
                 Path(request['output']).write_bytes(b'video')

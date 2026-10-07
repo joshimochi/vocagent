@@ -137,12 +137,14 @@ All model paths are local directories. `VOCAGENT_DEPLOY_ROOT` defaults to
 | `SHIELDGEMMA_MODEL` | `$VOCAGENT_DEPLOY_ROOT/models/shieldgemma-2-4b-it` |
 | `MINIMAX_H3_MODEL` | `/data/group6/minimax-h3/models/MiniMax-H3` |
 | `MINIMAX_H3_PYTHON` | `$VOCAGENT_DEPLOY_ROOT/run-a406/h3-venv/bin/python` |
-| `MINIMAX_H3_WIDTH`, `MINIMAX_H3_HEIGHT` | `1344`, `768` |
-| `MINIMAX_H3_SECONDS`, `MINIMAX_H3_STEPS` | `10`, `50` |
+| `MINIMAX_H3_STEPS` | `50` |
 | `MINIMAX_H3_TIMEOUT_SECONDS` | `14400` per video candidate |
 
-H3 duration is 5–15 seconds, rounded to its native video-frame grid. The default
-1344×768, 10-second shape passed a full GPU capacity check. Native-resolution
+H3 output is fixed at a width of 768, a height of 1344, and a requested duration
+of 15 seconds. Duration is rounded to its native video-frame grid within the
+15-second limit (345 frames at 24 fps, or 14.375 seconds). Outline and storyboard
+prompts use the same 15-second budget. These settings are hardcoded.
+The earlier 1344×768, 10-second shape passed a full GPU capacity check. Native-resolution
 generation is slow on S4000: allow roughly 2.5 hours for a 10-second, 50-point
 render based on the measured single iteration; the default worker limit is four
 hours and can be overridden. Many vocabulary
