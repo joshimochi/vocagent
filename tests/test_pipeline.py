@@ -92,7 +92,7 @@ class PipelineTests(unittest.TestCase):
         self.workflow = Workflow(self.providers, self.media)
 
     def test_benchmarks_cover_each_step_and_total_for_a_complete_run(self):
-        result = self.workflow.run(["apple", "pear"], self.output)
+        result = self.workflow.run(["apple"], self.output)
 
         self.assertEqual(result.benchmarks, self.output / "benchmark.json")
         report = json.loads(result.benchmarks.read_text(encoding="utf-8"))
@@ -144,10 +144,10 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(total["model_run_seconds"], 0)
 
     def test_chosen_candidates_flow_through_the_complete_workflow(self):
-        result = self.workflow.run([" apple ", "pear"], self.output)
+        result = self.workflow.run(" apple ", self.output)
 
         self.video_quality.validate_candidate_count.assert_called_once_with(2)
-        words = ("apple", "pear")
+        words = ("apple",)
         quality_calls = self.text_quality.choose.call_args_list
         self.assertEqual(len(quality_calls), 2)
         outline_call, storyboard_call = quality_calls
@@ -218,7 +218,7 @@ class PipelineTests(unittest.TestCase):
 
     def test_full_workflow_uses_default_media_for_each_video_candidate(self):
         with patch("vocagent.pipeline.FFmpegMedia", return_value=self.media) as media_factory:
-            result = Workflow(self.providers).run(["apple", "pear"], self.output)
+            result = Workflow(self.providers).run(["apple"], self.output)
 
         media_factory.assert_called_once_with()
         self.assertEqual(self.media.extract_audio.call_count, 2)
@@ -236,13 +236,13 @@ class PipelineTests(unittest.TestCase):
         # With no supplied media, even constructing FFmpegMedia is unnecessary.
         with patch("vocagent.pipeline.FFmpegMedia") as media_factory:
             result = Workflow(self.providers).run(
-                [" apple ", "pear"], self.output, stop_after="storyboard",
+                " apple ", self.output, stop_after="storyboard",
             )
         self.assertIsInstance(result, StoryboardResult)
         self.assertEqual(result.outline.read_text(), "outline 2")
         self.assertEqual(result.storyboard.read_text(), "storyboard 2")
         self.assertEqual(json.loads((self.output / "vocabulary.json").read_text()),
-                         ["apple", "pear"])
+                         ["apple"])
         self.assertEqual({path.name for path in self.output.iterdir()},
                          {"vocabulary.json", "outline.txt", "storyboard.txt",
                           "outline_candidates", "storyboard_candidates", "benchmark.json"})
@@ -262,9 +262,9 @@ class PipelineTests(unittest.TestCase):
         })
         self.assertEqual(self.text_quality.choose.call_count, 2)
         self.assertEqual(self.llm.generate_storyboard.call_args_list, [
-            call(("apple", "pear"), "outline 2", None),
-            call(("apple", "pear"), "outline 2", "use safe scenes"),
-            call(("apple", "pear"), "outline 2", None),
+            call(("apple",), "outline 2", None),
+            call(("apple",), "outline 2", "use safe scenes"),
+            call(("apple",), "outline 2", None),
         ])
         self.assertEqual(result.benchmarks, self.output / "benchmark.json")
         report = json.loads(result.benchmarks.read_text(encoding="utf-8"))
@@ -674,7 +674,7 @@ class PipelineTests(unittest.TestCase):
             TranscriptSegment(0, 1, "History of some writings."),
         ]
         with self.assertRaisesRegex(HumanInterventionRequired, "video.*four attempts"):
-            self.workflow.run(["curious", "discover"], self.output)
+            self.workflow.run(["curious"], self.output)
         self.assertEqual(self.video.generate.call_count, 8)
         self.assertEqual(self.video_safety.check.call_count, 8)
         self.assertEqual(self.audio_safety.check.call_count, 8)
@@ -845,12 +845,18 @@ class PipelineTests(unittest.TestCase):
         self.media.burn_subtitles.assert_not_called()
 
     def test_invalid_vocabulary_does_not_create_output_or_call_providers(self):
-        for vocabulary in (None, [], "apple", [""], ["  "], [1], ["apple", None]):
+        for vocabulary in (
+            None, [], "", "  ", [""], ["  "], [1], ["apple", None],
+            ["apple", "pear"], ["apple", "apple"], "green pear", ["green pear"],
+            "你好", ["你好"], "123", "apple!", {"apple": "pear"}, b"a",
+        ):
             with self.subTest(vocabulary=vocabulary):
-                with self.assertRaises(ValueError):
+                with self.assertRaisesRegex(ValueError, "exactly one English word"):
                     self.workflow.run(vocabulary, self.output)
                 self.assertFalse(self.output.exists())
         self.llm.generate_outline.assert_not_called()
+        self.video_quality.validate_candidate_count.assert_not_called()
+        self.text_safety.check.assert_not_called()
 
     def test_nonempty_output_is_rejected_without_touching_existing_files(self):
         self.output.mkdir()

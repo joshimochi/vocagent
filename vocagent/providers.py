@@ -8,6 +8,7 @@ Candidate slots run sequentially by default. When concurrent candidate generatio
 is enabled, generation, transcription, and safety methods must support concurrent
 calls on the same instance, up to the stage's configured candidate count (two by default).
 Quality judging runs after all candidate slots finish.
+Vocabulary sequences contain exactly one English target word per workflow.
 """
 
 from dataclasses import dataclass

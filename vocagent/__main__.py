@@ -10,6 +10,7 @@ from .models import StoryboardResult
 from .pipeline import Workflow
 from .providers import Providers
 from .selection import HumanInterventionRequired
+from .vocabulary import normalize_target_word
 
 
 DEFAULT_PROVIDER_FACTORY = "vocagent.local:create_providers"
@@ -25,6 +26,13 @@ def positive_integer(value: str) -> int:
     return count
 
 
+def english_word(value: str) -> str:
+    try:
+        return normalize_target_word(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from None
+
+
 def load_providers(spec: str) -> Providers:
     module_name, separator, factory_name = spec.partition(":")
     if not separator or not module_name or not factory_name:
@@ -38,9 +46,9 @@ def load_providers(spec: str) -> Providers:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        prog="vocagent", description="Generate a storyboard or subtitled video from vocabulary.",
+        prog="vocagent", description="Generate a storyboard or subtitled video teaching one English word.",
     )
-    parser.add_argument("vocabulary", nargs="+", help="Words or quoted phrases to include")
+    parser.add_argument("word", type=english_word, help="One English word to teach")
     parser.add_argument("--output-dir", type=Path, default=Path("output"),
                         help="New or empty output directory (default: output)")
     parser.add_argument("--providers", metavar="MODULE:FACTORY",
@@ -67,7 +75,7 @@ def main(argv: list[str] | None = None) -> int:
             storyboard_candidate_count=args.storyboard_candidate_count,
             video_candidate_count=args.video_candidate_count,
             concurrent_candidates=args.concurrent_candidates,
-        ).run(args.vocabulary, args.output_dir, stop_after=args.stop_after)
+        ).run(args.word, args.output_dir, stop_after=args.stop_after)
     except HumanInterventionRequired as exc:
         print(f"Human intervention required: {exc}", file=sys.stderr)
         return 2

@@ -14,7 +14,7 @@ from .models import SafetyResult, StoryboardResult, TranscriptSegment, WorkflowR
 from .providers import Providers
 from .selection import select_candidate, validate_safety_result, validate_selection_index
 from .subtitles import validate_segments, write_ass
-from .vocabulary import missing_vocabulary
+from .vocabulary import missing_vocabulary, normalize_target_word
 
 
 log = logging.getLogger(__name__)
@@ -56,19 +56,15 @@ class Workflow:
 
     def run(
         self,
-        vocabulary: Sequence[str],
+        vocabulary: str | Sequence[str],
         output_dir: str | Path,
         *,
         stop_after: Literal["storyboard", "video"] = "video",
     ) -> StoryboardResult | WorkflowResult:
-        """Write selected text artifacts, optionally continuing through final video."""
+        """Teach one English word, optionally continuing through final video."""
         if stop_after not in ("storyboard", "video"):
             raise ValueError("stop_after must be 'storyboard' or 'video'.")
-        if isinstance(vocabulary, str) or not vocabulary:
-            raise ValueError("Provide a nonempty sequence of vocabulary words.")
-        if any(not isinstance(word, str) or not word.strip() for word in vocabulary):
-            raise ValueError("Every vocabulary item must be a nonempty string.")
-        words = tuple(word.strip() for word in vocabulary)
+        words = (normalize_target_word(vocabulary),)
         if stop_after == "video":
             self.providers.video_quality.validate_candidate_count(self.video_candidate_count)
         output = Path(output_dir).resolve()

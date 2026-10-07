@@ -123,7 +123,7 @@ class Qwen3SpeechToText(SpeechToText):
 
     def __init__(
         self, runtime: Any, model: str = ASR_MODEL, aligner_model: str = ALIGNER_MODEL,
-        *, language: str | None = None,
+        *, language: str | None = "English",
     ) -> None:
         self.runtime = runtime
         self.model = _model_name(model)

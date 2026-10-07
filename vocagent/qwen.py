@@ -22,6 +22,7 @@ from .providers import (
     VideoQualityModel,
 )
 from .video_frames import sample_video_frames
+from .vocabulary import normalize_target_word
 
 
 class QwenError(RuntimeError):
@@ -49,14 +50,18 @@ class QwenGenerator(LLMGenerator):
 
     def generate_outline(self, vocabulary: Sequence[str], feedback: str | None) -> str:
         prompt = outline_prompt(self.storyboard_seconds)
-        inputs = {"vocabulary": list(vocabulary), "duration_seconds": self.storyboard_seconds}
+        inputs = {
+            "target_word": normalize_target_word(vocabulary), "language": "English",
+            "duration_seconds": self.storyboard_seconds,
+        }
         return self._generate(prompt, inputs, feedback, 1024)
 
     def generate_storyboard(
         self, vocabulary: Sequence[str], outline: str, feedback: str | None,
     ) -> str:
         inputs = {
-            "vocabulary": list(vocabulary), "outline": outline,
+            "target_word": normalize_target_word(vocabulary), "language": "English",
+            "outline": outline,
             "duration_seconds": self.storyboard_seconds,
         }
         prompt = storyboard_prompt(self.storyboard_seconds)
@@ -151,13 +156,14 @@ class QwenQuality(TextQualityAgent):
 
     def choose(self, stage: str, vocabulary: Sequence[str], candidates: Sequence[str]) -> int:
         _validate_stage(stage)
+        target_word = normalize_target_word(vocabulary)
         if (isinstance(candidates, str) or not candidates
                 or any(not isinstance(item, str) or not item.strip() for item in candidates)):
             raise ValueError("Qwen quality selection requires nonempty text candidates.")
         content = self.client.complete(
             [{"role": "system", "content": QUALITY_PROMPT},
              {"role": "user", "content": json.dumps({
-                 "stage": stage, "vocabulary": list(vocabulary),
+                 "stage": stage, "target_word": target_word, "language": "English",
                  "candidates": [{"index": index, "text": text}
                                 for index, text in enumerate(candidates)],
              }, ensure_ascii=False)}],
@@ -219,7 +225,9 @@ class QwenVideoQuality(VideoQualityModel):
         # too so increasing candidate slots cannot silently exhaust GPU memory.
         self.validate_candidate_count(len(candidates))
         content: list[dict[str, object]] = [
-            {"type": "text", "text": json.dumps({"storyboard": storyboard}, ensure_ascii=False)}
+            {"type": "text", "text": json.dumps({
+                "storyboard": storyboard, "language": "English",
+            }, ensure_ascii=False)}
         ]
         for index, path in enumerate(candidates):
             frames = sample_video_frames(

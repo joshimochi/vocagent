@@ -147,7 +147,7 @@ class SpeechTests(unittest.TestCase):
                 result = Qwen3SpeechToText(runtime).transcribe(path)
         self.assertEqual(result, [TranscriptSegment(180.1, 181, "Hello, world!")])
         speech.transcribe.assert_called_once_with(
-            audio=str(path), language=None, return_time_stamps=True,
+            audio=str(path), language="English", return_time_stamps=True,
         )
         self.assertEqual(runtime.keys, [("qwen3-speech", ASR_MODEL, ALIGNER_MODEL)])
         self.assertFalse(runtime.active)
@@ -164,6 +164,25 @@ class SpeechTests(unittest.TestCase):
             )}), self.assertRaises(LocalModelError):
                 Qwen3SpeechToText(runtime).transcribe(path)
         self.assertFalse(runtime.active)
+
+    def test_explicit_language_override_is_forwarded(self):
+        for language in (None, "Chinese"):
+            with self.subTest(language=language):
+                speech = MagicMock()
+                speech.transcribe.return_value = [SimpleNamespace(
+                    text="Hello!", time_stamps=SimpleNamespace(items=[word("Hello", 0, 1)]),
+                )]
+                with tempfile.TemporaryDirectory() as directory, patch.dict(
+                    "sys.modules", {"soundfile": SimpleNamespace(
+                        info=lambda _: SimpleNamespace(duration=2),
+                    )},
+                ):
+                    path = Path(directory) / "audio.wav"
+                    path.write_bytes(b"audio")
+                    Qwen3SpeechToText(Runtime(speech), language=language).transcribe(path)
+                    speech.transcribe.assert_called_once_with(
+                        audio=str(path), language=language, return_time_stamps=True,
+                    )
 
 
 class ShieldTests(unittest.TestCase):

@@ -1,6 +1,6 @@
 # hs deployment
 
-## Current status — 2026-10-06
+## Current status — 2026-10-07
 
 **The technical pipeline and native H3 capacity checks passed; final spoken-vocabulary validation is in progress.** Source changes
 for the model adapters have been uploaded to `/data/group6/vocagent/run-a406/app`.
@@ -9,6 +9,12 @@ locally and awaiting synchronization while SSH is unavailable. Network connectiv
 to `hs` is intermittent: SSH connections frequently time out, including an
 established interactive session. Detached validation jobs use locks and log files
 so connection loss does not duplicate model loads.
+
+The current source accepts exactly one English target word and focuses its
+English outline, storyboard, and dialogue on one clear meaning of that word.
+These source and prompt changes still need upload and validation on `hs`; the
+completed checks and ongoing remote run below used the earlier vocabulary-input
+behavior.
 
 The latest full run is `full-workflow-3` (1344×768, five seconds, 50 sigma
 points). The first native-resolution clip completed rendering, ASR and safety
@@ -64,21 +70,24 @@ Completed on `hs`:
 
 Still required:
 
-- The corrected complete 768p vocabulary-to-subtitled-video run using native H3 dialogue tags.
+- The corrected complete 768p single-word-to-subtitled-video run with English
+  dialogue focused on one meaning of the target word.
   The first complete run passed every stage but its speech omitted the requested
   words; this semantic failure is preserved in [its report](validation/full-workflow-1.json).
 
 The complete test suite passed on hs: **177 tests, no skips**, including numerical
 convolution checks and real FFmpeg integration. [Test record](validation/tests-hs.json).
-The current local suite runs 179 tests: 165 pass and 14 checks skip because
-PyTorch and FFmpeg are unavailable. Coverage includes spoken vocabulary,
+The current local suite passes **208 tests: 194 passed and 14 skipped** because
+PyTorch and FFmpeg are unavailable. Coverage includes single-word input validation,
+English prompts and speech configuration, spoken vocabulary,
 early candidate-capacity validation, native image messages, and complete provider
 bundles, plus plain storyboard generation without format repair. The
 [earlier local test record](validation/tests-local-final.json)
-preserves the validation before the provider cleanup. An unskipped run of the
+preserves the validation before the provider cleanup. The earlier reported local
+suite had 179 tests (165 passed and 14 skipped). An unskipped run of the
 current source on hs is pending restored SSH access. These tests complement the
-live model probes. The first full workflow passed the complete sequence; a
-corrected run verifies the corrected spoken-vocabulary prompt.
+live model probes. The first full workflow passed the complete sequence; a new
+single-word run must verify the current prompt and actual spoken target word.
 
 ## Runtime and model choice
 
@@ -158,14 +167,15 @@ docker exec -e PYTHONPATH=/data/group6/vocagent/run-a406/app \
   /data/group6/vocagent/run-a406/h3-venv/bin/python -m unittest discover -s tests -p test_minimax.py -v
 ```
 
-Validate text first, then the complete agent, using new output directories:
+Validate text first, then the complete agent, using one English target word and
+new output directories:
 
 ```sh
-bash deploy/run_hs.sh sunrise curious journey --stop-after storyboard \
+bash deploy/run_hs.sh curious --stop-after storyboard \
   --outline-candidate-count 1 --storyboard-candidate-count 1 \
   --output-dir /data/group6/vocagent/outputs/a406-text-smoke
 
-bash deploy/run_hs.sh sunrise curious journey \
+bash deploy/run_hs.sh curious \
   --output-dir /data/group6/vocagent/outputs/a406-video-smoke
 ```
 
@@ -178,7 +188,7 @@ For long runs over the intermittent SSH connection, detach the command and keep
 its log outside the new output directory:
 
 ```sh
-nohup bash deploy/run_hs.sh sunrise curious journey \
+nohup bash deploy/run_hs.sh curious \
   --output-dir /data/group6/vocagent/outputs/detached-example \
   > /data/group6/vocagent/logs/detached-example.log 2>&1 < /dev/null &
 ```

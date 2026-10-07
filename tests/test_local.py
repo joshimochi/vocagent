@@ -31,6 +31,7 @@ class LocalFactoryTests(unittest.TestCase):
             self.assertIsInstance(providers.video_quality, QwenVideoQuality)
             self.assertIsInstance(providers.audio_safety, QwenAudioSafety)
             self.assertIsInstance(providers.speech_to_text, Qwen3SpeechToText)
+            self.assertEqual(providers.speech_to_text.language, "English")
             self.assertIsInstance(providers.video_safety, ShieldGemma2VideoSafety)
             self.assertIsNot(providers.llm.client, providers.text_quality.client)
             for provider in (providers.llm, providers.text_safety, providers.text_quality,

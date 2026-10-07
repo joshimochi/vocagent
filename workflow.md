@@ -1,14 +1,18 @@
-1. Accept vocabulary words or phrases.
-2. Generate, safety-check, and select a story outline.
-3. Generate, safety-check, and select a storyboard.
+1. Accept exactly one English target word, rejecting multiple words, phrases, and malformed
+   input. Allow ASCII letters with internal apostrophes or hyphens, and treat the
+   word as English without a dictionary lookup.
+2. Generate, safety-check, and select an English story outline focused on one
+   clear meaning of the target word.
+3. Generate, safety-check, and select an English storyboard that keeps that
+   meaning and uses English dialogue containing the target word.
 4. For each video candidate attempt:
    - Generate a video from the selected storyboard.
-   - Extract audio with FFmpeg and transcribe it into timestamped segments.
+   - Extract audio with FFmpeg and transcribe it in English into timestamped segments.
    - Validate the segments and save the audio and transcript beside the video.
    - Check visuals with `VideoSafetyModel` and spoken content with a separate
      `AudioSafetyModel`, passing the segment texts joined with newlines.
-   - After both safety models pass, require every requested word or phrase in the
-     actual recognized speech, using normalized complete words/phrases.
+   - After both safety models pass, require the target word in the actual
+     recognized speech, using normalized complete-word matching.
    - Keep the candidate only when both safety and spoken-vocabulary checks pass.
 5. Choose the best safe video with `VideoQualityModel`.
 6. Copy the selected candidate's existing audio and transcript to `audio.wav`
@@ -22,6 +26,9 @@ Qwen3-ASR-1.7B plus ForcedAligner-0.6B for timestamped speech; and ShieldGemma2
 4B for sampled-frame visual safety. The CLI and Python API default to the full
 video workflow. `--stop-after storyboard` or `stop_after="storyboard"` stops after
 selected text artifacts. Provider factories supply every workflow stage.
+The CLI takes one positional word, for example `curious`. The Python API accepts
+`Workflow(providers).run("curious", "output")` or the singleton sequence
+`["curious"]` as its input.
 
 Local storyboards use a plain storyboard prompt describing scene durations,
 visuals, dialogue and audio cues, with a speaking budget based on clip duration.
@@ -34,7 +41,8 @@ separate dependency environment after the parent releases its model weights.
 ShieldGemma is an image classifier applied at 2fps, including the clip tail;
 sampled-frame checks do not guarantee observation of brief events between frames.
 Model/runtime checks passed on hs; final spoken-vocabulary validation is in
-progress. See deploy/README.md for the live deployment status.
+progress, and the single-word changes still need hs validation. See
+deploy/README.md for the deployment status.
 
 For the outline, storyboard, and video stages, fill the configured number of
 candidate slots with generation/safety/content attempts, then let a separate quality
@@ -70,7 +78,7 @@ Each video attempt writes sibling `candidate-N-attempt-N.mp4`, `.wav`, and `.jso
 files under `video_candidates/`. Both safety checks run after successful
 transcription and validation; the audio safety model receives transcript text,
 not raw audio. If either check fails, delete all three files and retry without
-feedback. A safe clip missing requested vocabulary is also deleted and retried
+feedback. A safe clip missing the target word is also deleted and retried
 within the same four-attempt budget. Matching allows case and punctuation
 differences, not synonyms, homophones, translations, or inflected forms.
 Retain every accepted candidate and its sidecars. Reuse the winner's

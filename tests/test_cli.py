@@ -33,6 +33,23 @@ def providers_for_test(**overrides):
 
 
 class CLITests(unittest.TestCase):
+    def test_invalid_word_is_rejected_before_providers_or_output(self):
+        for words in (
+            [], ["apple", "pear"], ["apple", "apple"], ["green pear"],
+            ["你好"], [""], ["123"], ["apple!"],
+        ):
+            with self.subTest(words=words), tempfile.TemporaryDirectory() as temporary:
+                output = Path(temporary) / "result"
+                with patch("vocagent.__main__.load_providers") as load, \
+                        patch("vocagent.__main__.Workflow") as workflow, \
+                        redirect_stderr(io.StringIO()), \
+                        self.assertRaises(SystemExit) as raised:
+                    main([*words, "--output-dir", str(output)])
+                self.assertEqual(raised.exception.code, 2)
+                load.assert_not_called()
+                workflow.assert_not_called()
+                self.assertFalse(output.exists())
+
     def test_default_provider_configuration_failure_is_a_clear_cli_error(self):
         stderr = io.StringIO()
         stdout = io.StringIO()
@@ -98,7 +115,7 @@ class CLITests(unittest.TestCase):
         self.assertEqual(status, 0)
         load.assert_called_once_with("vocagent.local:create_providers")
         workflow.return_value.run.assert_called_once_with(
-            ["apple"], Path("chosen-output"), stop_after="video",
+            "apple", Path("chosen-output"), stop_after="video",
         )
         providers.close.assert_called_once_with()
         self.assertEqual(stdout.getvalue(), f"{final_path}\n")
@@ -130,7 +147,7 @@ class CLITests(unittest.TestCase):
 
                 self.assertEqual(status, 0)
                 workflow.return_value.run.assert_called_once_with(
-                    ["apple"], Path("output"), stop_after=stage,
+                    "apple", Path("output"), stop_after=stage,
                 )
 
     def test_safety_exhaustion_reports_human_intervention_and_exit_two(self):
@@ -161,7 +178,7 @@ class CLITests(unittest.TestCase):
                 patch("vocagent.__main__.Workflow") as workflow, \
                 redirect_stdout(stdout):
             workflow.return_value.run.return_value = SimpleNamespace(final_video=final_path)
-            status = main(["apple", "green pear", "--providers", "example:build",
+            status = main(["apple", "--providers", "example:build",
                            "--output-dir", "chosen-output"])
 
         self.assertEqual(status, 0)
@@ -171,7 +188,7 @@ class CLITests(unittest.TestCase):
             video_candidate_count=2, concurrent_candidates=False,
         )
         workflow.return_value.run.assert_called_once_with(
-            ["apple", "green pear"], Path("chosen-output"), stop_after="video",
+            "apple", Path("chosen-output"), stop_after="video",
         )
         self.assertEqual(stdout.getvalue(), f"{final_path}\n")
 

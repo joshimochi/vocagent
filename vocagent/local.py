@@ -60,6 +60,6 @@ def create_providers(environ: Mapping[str, str] | None = None) -> Providers:
         video_quality=QwenVideoQuality(
             LocalChatClient(runtime, vl, vision=True), max_total_frames=32,
         ),
-        speech_to_text=Qwen3SpeechToText(runtime, asr, aligner),
+        speech_to_text=Qwen3SpeechToText(runtime, asr, aligner, language="English"),
         audio_safety=QwenAudioSafety(LocalChatClient(runtime, guard)),
     )

@@ -1,6 +1,8 @@
 # vocagent
 
-A vocabulary-to-video agent with separate generation, safety, and selection calls.
+A vocabulary-to-video agent that takes exactly one English word and makes a video
+focused on one clear meaning of that word, with separate generation, safety, and
+selection calls.
 The default provider factory is `vocagent.local:create_providers`, intended to run
 entirely on `hs`, using physical GPUs **4–7** (four MTT S4000, 48 GiB each).
 
@@ -20,7 +22,8 @@ duration-specific builders there. The opt-in diagnostic prompt lives in
 
 **Final content validation is in progress.** The complete technical pipeline and
 native-resolution H3 capacity checks passed on `hs`. The latest full validation run
-uses an earlier prompt with H3's native dialogue format. See [deployment status](deploy/README.md)
+uses an earlier prompt with H3's native dialogue format; the single-word changes
+have not yet been validated on `hs`. See [deployment status](deploy/README.md)
 for the exact completed checks and remaining work.
 
 ## Run on hs
@@ -30,16 +33,23 @@ After deploying and setting up the environment as described in
 
 ```sh
 cd /data/group6/vocagent/run-a406/app
-bash deploy/run_hs.sh sunrise curious journey \
+bash deploy/run_hs.sh curious \
   --output-dir /data/group6/vocagent/outputs/example
 ```
+
+Each run accepts exactly one English target word. Multiple words and phrases are rejected.
+The input permits ASCII letters with internal apostrophes or hyphens, such as
+`don't` or `well-known`; it is treated as English without a dictionary lookup.
+Generation and selection prompts require English text and spoken dialogue, with
+the outline, storyboard, and video focused on one clear meaning of the target word.
+Speech recognition also defaults to English.
 
 The CLI defaults to a complete subtitled video. `--stop-after storyboard`
 stops after the selected text artifacts. The output directory must be new or
 empty. Candidate counts default to two per stage:
 
 ```sh
-bash deploy/run_hs.sh sunrise curious journey \
+bash deploy/run_hs.sh curious \
   --outline-candidate-count 2 --storyboard-candidate-count 2 \
   --video-candidate-count 2 --output-dir /data/group6/vocagent/outputs/example-2
 ```
@@ -52,11 +62,13 @@ from vocagent.pipeline import Workflow
 
 providers = create_providers()
 try:
-    result = Workflow(providers).run(["sunrise", "curious"], "output")
+    result = Workflow(providers).run("curious", "output")
     print(result.final_video)
 finally:
     providers.close()
 ```
+
+The Python API also accepts a singleton sequence such as `["curious"]`.
 
 ## Memory and model choice
 
@@ -90,12 +102,12 @@ threads can preprocess in parallel, but model inference remains serialized.
    using a speaking budget matched to the clip duration. Check each with Guard
    and select the best safe storyboard.
 3. Generate a video with native audio. Extract mono 16 kHz PCM audio with FFmpeg.
-4. Run Qwen3-ASR plus forced alignment. Preserve the recognized text and its
+4. Run Qwen3-ASR in English plus forced alignment. Preserve the recognized text and its
    aligned timestamps in the saved transcript and subtitle cues.
 5. Check visual frames with ShieldGemma 2 and the **complete recognized
    transcript** with Qwen3Guard. Both checks must pass.
-6. Require every requested word or phrase in the actual ASR transcript. Missing
-   vocabulary rejects the clip and uses the same bounded retry budget.
+6. Require the target word in the actual ASR transcript. A missing
+   target word rejects the clip and uses the same bounded retry budget.
 7. Use Qwen3-VL to select among accepted videos from actual, timestamped image frames.
 8. Reuse the selected transcript; write ASS subtitles and burn them into the
    selected video with FFmpeg, preserving its audio.
@@ -108,8 +120,8 @@ events between samples. Clips exceeding the sampling budget are rejected with an
 error rather than silently shortening coverage. VL video judging samples up to
 16 frames per candidate. The local 16K-context configuration allows two video
 candidate slots (32 frames total), validated before any generation. Video judging
-evaluates visible evidence; it does not listen to audio. Spoken vocabulary matching uses normalized complete
-words or phrases, allowing case and punctuation differences. It does not infer
+evaluates visible evidence; it does not listen to audio. Spoken target-word matching uses normalized complete
+words, allowing case and punctuation differences. It does not infer
 synonyms, homophones, translations, or inflected forms.
 
 Each candidate slot gets at most four generation/safety/content attempts. Unsafe text
@@ -148,8 +160,8 @@ prompts use the same 15-second budget. These settings are hardcoded.
 The earlier 1344×768, 10-second shape passed a full GPU capacity check. Native-resolution
 generation is slow on S4000: allow roughly 2.5 hours for a 10-second, 50-point
 render based on the measured single iteration; the default worker limit is four
-hours and can be overridden. Many vocabulary
-items may not fit naturally in a single clip; choose a small vocabulary set.
+hours and can be overridden. Each clip teaches the single target word through
+one clear meaning and a compact scene.
 
 Provider factories must return a complete `Providers` bundle for all workflow
 stages. Local runs use checkpoint directories and do not need API endpoints,

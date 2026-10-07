@@ -31,26 +31,30 @@ class QwenTests(unittest.TestCase):
         call = self.complete.call_args
         return {"messages": call.args[0], **call.kwargs}
 
-    def test_outline_carries_unicode_feedback_duration_and_no_thinking(self):
+    def test_outline_carries_one_english_target_feedback_duration_and_no_thinking(self):
         self.reply("The story outline")
         self.assertEqual(
-            self.generator.generate_outline(["apple", "你好"], "Remove violence."),
+            self.generator.generate_outline([" apple "], "Remove violence."),
             "The story outline",
         )
         data = self.sent()
         self.assertTrue(data["non_thinking"])
         self.assertGreater(data["temperature"], 0)
         self.assertEqual(json.loads(data["messages"][1]["content"]), {
-            "vocabulary": ["apple", "你好"], "duration_seconds": 10,
+            "target_word": "apple", "language": "English", "duration_seconds": 10,
             "safety_feedback": "Remove violence.",
         })
         self.assertIn("safety feedback", data["messages"][0]["content"])
         self.assertIn("10-second video", data["messages"][0]["content"])
+        self.assertIn("exactly one supplied English target word", data["messages"][0]["content"])
+        self.assertIn("one clear meaning throughout", data["messages"][0]["content"])
+        self.assertIn("Write all text in English", data["messages"][0]["content"])
+        self.assertIn("Repeat the target word naturally", data["messages"][0]["content"])
 
     def test_generation_calls_do_not_share_conversation_state(self):
         def serve(messages, **kwargs):
             self.assertEqual(len(messages), 2)
-            return json.loads(messages[1]["content"])["vocabulary"][0]
+            return json.loads(messages[1]["content"])["target_word"]
 
         self.complete.side_effect = serve
         with ThreadPoolExecutor(max_workers=4) as executor:
@@ -63,11 +67,11 @@ class QwenTests(unittest.TestCase):
     def test_local_storyboard_uses_plain_prompt_and_returns_response_in_one_call(self):
         storyboard = (
             "Scene 1 (0–10 seconds): A friend catches an apple.\n"
-            'Dialogue: "你好! Catch the apple!"\nAudio: Leaves rustle.'
+            'Dialogue: "An apple! Catch the apple!"\nAudio: Leaves rustle.'
         )
         self.reply(storyboard)
         self.assertEqual(self.generator.generate_storyboard(
-            ["apple", "你好"], "A friend catches an apple.", "Use a gentle scene.",
+            [" apple "], "A friend catches an apple.", "Use a gentle scene.",
         ), storyboard)
         data = self.sent()
         prompt = data["messages"][0]["content"]
@@ -77,11 +81,15 @@ class QwenTests(unittest.TestCase):
         self.assertNotIn("integrated_multimodal_description", prompt)
         self.assertNotIn("<d>", prompt)
         self.assertIn("hard duration of 10 seconds", prompt)
-        self.assertIn("at most 20 spoken words TOTAL", prompt)
+        self.assertIn("at most 20 spoken English words TOTAL", prompt)
         self.assertIn("normal speaking pace", prompt)
-        self.assertIn("Speak every vocabulary item", prompt)
+        self.assertIn("Speak the target word unchanged", prompt)
+        self.assertIn("repeat it naturally", prompt)
+        self.assertIn("one clear meaning", prompt)
+        self.assertIn("Write all instructions, dialogue and narration in English", prompt)
+        self.assertNotIn("other languages", prompt)
         self.assertEqual(json.loads(data["messages"][1]["content"]), {
-            "vocabulary": ["apple", "你好"], "outline": "A friend catches an apple.",
+            "target_word": "apple", "language": "English", "outline": "A friend catches an apple.",
             "duration_seconds": 10, "safety_feedback": "Use a gentle scene.",
         })
         self.assertEqual(data["max_tokens"], 2048)
@@ -159,9 +167,14 @@ class QwenTests(unittest.TestCase):
         data = self.sent()
         self.assertTrue(data["non_thinking"])
         self.assertEqual(json.loads(data["messages"][1]["content"]), {
-            "stage": "storyboard", "vocabulary": ["apple"],
+            "stage": "storyboard", "target_word": "apple", "language": "English",
             "candidates": [{"index": 0, "text": "first"}, {"index": 1, "text": "second"}],
         })
+        prompt = data["messages"][0]["content"]
+        self.assertIn("exactly one supplied English target word", prompt)
+        self.assertIn("one clear meaning throughout", prompt)
+        self.assertIn("non-English text", prompt)
+        self.assertIn("additional vocabulary-learning objectives", prompt)
 
     def test_quality_judge_still_runs_for_one_survivor(self):
         self.reply('{"index": 0}')
@@ -203,6 +216,19 @@ class QwenTests(unittest.TestCase):
                 self.quality.choose("outline", ["word"], candidates)
         self.complete.assert_not_called()
 
+    def test_generation_and_selection_reject_multiple_or_nonenglish_targets_before_inference(self):
+        for vocabulary in (
+            [], ["apple", "pear"], ["你好"], ["ice cream"], [""], ["apple!"], [None],
+        ):
+            for invoke in (
+                lambda: self.generator.generate_outline(vocabulary, None),
+                lambda: self.generator.generate_storyboard(vocabulary, "An outline.", None),
+                lambda: self.quality.choose("outline", vocabulary, ["A story."]),
+            ):
+                with self.subTest(vocabulary=vocabulary, invoke=invoke), self.assertRaises(ValueError):
+                    invoke()
+        self.complete.assert_not_called()
+
     def test_transcript_guard_checks_all_spoken_content_using_native_template(self):
         transcript = "The first scene is gentle.\nThe last scene contains bad content."
         self.reply("Safety: Unsafe\nCategories: Violent\nRefusal: No")
@@ -235,7 +261,10 @@ class QwenTests(unittest.TestCase):
         data = self.sent()
         self.assertTrue(data["non_thinking"])
         content = data["messages"][1]["content"]
-        self.assertEqual(json.loads(content[0]["text"]), {"storyboard": "A clear storyboard."})
+        self.assertEqual(json.loads(content[0]["text"]), {
+            "storyboard": "A clear storyboard.", "language": "English",
+        })
+        self.assertIn("exactly one English target word", data["messages"][0]["content"])
         images = [block["image"] for block in content if block["type"] == "image"]
         self.assertEqual(images, [frame.jpeg for group in frames for frame in group])
         captions = [block["text"] for block in content if block["type"] == "text"]
