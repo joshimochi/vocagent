@@ -1,39 +1,17 @@
 # vocagent
 
-A vocabulary-to-video agent that takes exactly one English word and makes a video
-focused on one clear meaning of that word, with separate generation, safety, and
-selection calls.
-The default provider factory is `vocagent.local:create_providers`, intended to run
-entirely on `hs`, using physical GPUs **4–7** (four MTT S4000, 48 GiB each).
+Turn one English word into a subtitled cartoon that teaches one clear meaning.
+The workflow generates candidates, checks safety, and selects the best result
+using separate model calls. It runs locally on `hs`, using physical GPUs **4–7**
+(four MTT S4000 cards, 48 GiB each).
 
-Model prompts live in [`vocagent/prompts/`](vocagent/prompts/), grouped into
-generation, safety, and quality selection modules. Edit the prompt text and
-duration-specific builders there. The opt-in diagnostic prompt lives in
-[`vocagent/diagnostics.py`](vocagent/diagnostics.py).
-Video prompt generation includes the full bundled
-[`h3_prompt_guide.md`](vocagent/prompts/h3_prompt_guide.md) in its system prompt,
-followed by the vocabulary-learning instructions and configured duration and
-speaking budget. The guide covers only text-to-video-with-audio (T2VA).
+**Validation:** the technical pipeline and native-resolution H3 capacity checks
+passed on `hs`. The current single-word prompts still need a complete content
+validation run. See [deployment status and setup](deploy/README.md).
 
-| Task | Local checkpoint |
-| --- | --- |
-| Outline, video prompt, text selection, visual video selection | Qwen/Qwen3-VL-32B-Instruct, BF16 |
-| Text and complete transcript safety | Qwen/Qwen3Guard-Gen-8B, BF16 |
-| Video with native audio | MiniMaxAI/MiniMax-H3, full released weights |
-| Speech recognition | Qwen/Qwen3-ASR-1.7B, BF16 |
-| Word timestamps | Qwen/Qwen3-ForcedAligner-0.6B, BF16 |
-| Visual safety | google/shieldgemma-2-4b-it, BF16 |
+## Run
 
-**Final content validation is in progress.** The complete technical pipeline and
-native-resolution H3 capacity checks passed on `hs`. The latest full validation run
-uses an earlier prompt with H3's native dialogue format; the single-word changes
-have not yet been validated on `hs`. See [deployment status](deploy/README.md)
-for the exact completed checks and remaining work.
-
-## Run on hs
-
-After deploying and setting up the environment as described in
-[deploy/README.md](deploy/README.md):
+After [setting up hs](deploy/README.md#setup):
 
 ```sh
 cd /data/group6/vocagent/run-a406/app
@@ -41,26 +19,23 @@ bash deploy/run_hs.sh curious \
   --output-dir /data/group6/vocagent/outputs/example
 ```
 
-Each run accepts exactly one English target word. Multiple words and phrases are rejected.
-The input permits ASCII letters with internal apostrophes or hyphens, such as
-`don't` or `well-known`; it is treated as English without a dictionary lookup.
-Generation and selection prompts require cartoon animation, English text and
-spoken dialogue, with the outline, video prompt, and video focused on one clear
-meaning of the target word. The video prompt explicitly states the cartoon style.
-Language and clip duration are specified in system prompts. Speech recognition
-also defaults to English.
+Use one word and a new or empty output directory. Input accepts ASCII letters
+with internal apostrophes or hyphens, such as `don't` or `well-known`; it does not
+check a dictionary. Prompts request English text and speech throughout.
 
-The CLI defaults to a complete subtitled video. `--stop-after video-prompt`
-stops after the selected text artifacts. The output directory must be new or
-empty. Candidate counts default to two per stage:
+The default run produces a subtitled video with two candidate slots per stage.
+Use `--stop-after video-prompt` to produce only the selected outline and video
+prompt. Set candidate counts independently:
 
 ```sh
-bash deploy/run_hs.sh curious \
+bash deploy/run_hs.sh curious --stop-after video-prompt \
   --outline-candidate-count 2 --video-prompt-candidate-count 2 \
-  --video-candidate-count 2 --output-dir /data/group6/vocagent/outputs/example-2
+  --output-dir /data/group6/vocagent/outputs/text-example
 ```
 
-The Python API:
+`--video-candidate-count` accepts 1 or 2 with the local provider. Text candidate
+counts can be any positive integer. `--concurrent-candidates` lets slots run
+concurrently within a stage; stages and local GPU inference remain sequential.
 
 ```python
 from vocagent.local import create_providers
@@ -74,86 +49,84 @@ finally:
     providers.close()
 ```
 
-The Python API also accepts a singleton sequence such as `["curious"]`.
-Use `stop_after="video_prompt"` to return the selected text artifacts as a
-`VideoPromptResult`.
+The Python API also accepts `["curious"]`. Pass candidate counts and
+`concurrent_candidates=True` to `Workflow`; pass `stop_after="video_prompt"` to
+`run` to receive a `VideoPromptResult` with the selected text paths.
 
-The former `storyboard` stage is now `video_prompt`: update Python provider
-methods to `generate_video_prompt`, configuration to `video_prompt_seconds` and
-`video_prompt_candidate_count`, and result fields to `video_prompt`. CLI flags
-use hyphens: `--stop-after video-prompt` and `--video-prompt-candidate-count`.
-Selected text and candidate files now use `video_prompt.txt` and
-`video_prompt_candidates/`; benchmark steps use `video_prompt.*`. Old names have
-no compatibility aliases; existing output files are not renamed.
+## Workflow
 
-## Memory and model choice
+1. Generate outlines, check each with Qwen3Guard, and select a safe outline.
+2. Generate video prompts, check each with Guard, and select a safe prompt.
+3. Generate video candidates with native audio using MiniMax H3.
+4. Extract mono 16 kHz PCM audio with FFmpeg, transcribe it in English, and align
+   word timestamps. Save the recognized text and timestamps without rewriting them.
+5. Check sampled frames with ShieldGemma 2 and the complete, newline-joined
+   transcript with Guard. Both checks must pass.
+6. Select the best safe video using Qwen3-VL and timestamped image frames.
+7. Reuse its audio and transcript, write ASS subtitles, and burn them into the
+   video with FFmpeg while preserving the original audio.
 
-The runtime loads a model family on demand and destroys the previous weights
-before loading its replacement. It checks every model parameter and placement
-hook, rejecting CPU, disk, and meta placement or weight offloading. GPU memory
-budgets reserve runtime headroom; insufficient memory stops the run. There is no
-smaller-model or CPU inference fallback. CPU tokenization, checkpoint reading,
-media decoding/encoding, and input preprocessing are ordinary supporting work.
+Video prompt generation includes the bundled [H3 guide](vocagent/prompts/h3_prompt_guide.md)
+and task instructions for cartoon animation, one word meaning, English dialogue,
+and a 15-second clip with at most 30 spoken words. The selected prompt goes to H3 unchanged.
+See [prompt reference](prompts.md) for the format and source files.
 
-The 32B model is the largest dense Qwen3-VL release. The 235B checkpoint exceeds
-this allocation in BF16 and FP8; the installed S4000 stack has not demonstrated a
-working GPU-only 4-bit route. The other Qwen checkpoints are their largest
-released family sizes; ShieldGemma 2 provides a 4B checkpoint. H3 uses the full
-released encoder and diffusion weights in BF16 and its decoders in FP32 (video decoding uses FP16 autocast on MUSA).
-Full H3 GPU residency and low-resolution native audio/video generation passed on hs.
-Normal-resolution memory capacity also passed. The latest full validation run uses
-the earlier native H3 prompt format to verify spoken vocabulary.
+Each slot gets up to four generation and safety attempts. Rejected text supplies
+feedback for the next attempt. Rejected videos and their audio/transcript files
+are deleted and retried without feedback. Exhausted slots are ignored. A quality
+judge selects from safe survivors in slot order; a sole survivor is used directly.
+If none survive, the workflow raises `HumanInterventionRequired`.
 
-Separate stateless text generation and selection agents share the same VL
-weights. Qwen3-VL uses uncached SDPA on MUSA because cached decoding failed
-correctness checks on the installed stack. ASR and its small aligner reside together. H3 runs in a separate Python
-process because its dependency versions conflict with the speech package;
-the shared GPU lock covers that process through its exit. Concurrent candidate
-threads can preprocess in parallel, but model inference remains serialized.
+Provider, GPU, media, transcript, and malformed-response errors stop the run.
+With concurrency enabled, new attempts stop while in-flight work finishes.
+There is no automatic resume; resolve the failure and use a new output directory.
 
-## Workflow and safety behavior
+### Safety and selection limits
 
-1. Generate outlines; check each with Qwen3Guard; select the best safe outline.
-2. Generate video prompts using the H3 guide's three core fields, shot sequence,
-   visuals, dialogue and audio cues, with a speaking budget matched to the clip
-   duration. Check each with Guard and select the best safe video prompt.
-3. Generate a video with native audio. Extract mono 16 kHz PCM audio with FFmpeg.
-4. Run Qwen3-ASR in English plus forced alignment. Preserve the recognized text and its
-   aligned timestamps in the saved transcript and subtitle cues.
-5. Check visual frames with ShieldGemma 2 and the **complete recognized
-   transcript** with Qwen3Guard. Both checks must pass.
-6. Use Qwen3-VL to select among accepted videos from actual, timestamped image frames.
-7. Reuse the selected transcript; write ASS subtitles and burn them into the
-   selected video with FFmpeg, preserving its audio.
+ShieldGemma checks `dangerous`, `sexual`, and `violence` policies at 2 frames per
+second, including the final nominal frame. A violation probability of 0.5 or
+higher rejects the video. Clips exceeding the sampling budget raise an error.
+Sampling can miss brief events between frames.
 
-ShieldGemma 2 is an **image** safety classifier, applied throughout the video at
-2 frames/second, including the final nominal frame. It checks the model's
-`dangerous`, `sexual`, and `violence` policies; any violation probability at or
-above 0.5 rejects the candidate. Sampling cannot guarantee detection of brief
-events between samples. Clips exceeding the sampling budget are rejected with an
-error rather than silently shortening coverage. VL video judging samples up to
-16 frames per candidate. The local 16K-context configuration allows two video
-candidate slots (32 frames total), validated before any generation. Video judging
-evaluates visible evidence; it does not listen to audio. ASR provides recognized
-speech for transcript safety and subtitles.
+The video judge sees up to 16 frames per candidate and does not hear audio. The
+local 16K context budget supports two candidate slots (32 frames total), checked
+before generation. ASR supplies transcript safety and subtitles; the workflow
+**does not require an exact target-word match in recognized speech**.
 
-Each candidate slot gets at most four generation/safety attempts. Unsafe text
-supplies feedback to the next attempt. Rejected video attempts and their audio
-and transcript files are deleted and regenerated without feedback. Candidates
-passing safety are retained; an exhausted slot is ignored. A separate quality judge
-runs when multiple candidates survive; a sole survivor is used directly without
-a selection call. If none survive, the workflow
-raises `HumanInterventionRequired`.
+## Models and runtime
 
-Provider errors, missing speech, incomplete alignment, malformed moderation,
-truncated text, invalid selections, GPU failures, and media errors stop the run;
-they are never converted into fabricated safe results. Automatic resume is not
-implemented; start another run in a new output directory after resolving a failure.
+| Task | Local checkpoint |
+| --- | --- |
+| Outline, video prompt, text and visual selection | Qwen/Qwen3-VL-32B-Instruct, BF16 |
+| Text and transcript safety | Qwen/Qwen3Guard-Gen-8B, BF16 |
+| Video with native audio | MiniMaxAI/MiniMax-H3, full released weights |
+| Speech recognition | Qwen/Qwen3-ASR-1.7B, BF16 |
+| Word timestamps | Qwen/Qwen3-ForcedAligner-0.6B, BF16 |
+| Visual safety | google/shieldgemma-2-4b-it, BF16 |
+
+The runtime loads one model family at a time and releases its weights before
+loading another. It reserves GPU headroom and rejects CPU, disk, or meta weight
+placement and offloading. There is no smaller-model or CPU inference fallback.
+Tokenization, checkpoint loading, preprocessing, and media I/O may use the CPU.
+
+Separate stateless generation and selection agents share the VL weights. On
+MUSA, Qwen3-VL uses uncached SDPA because cached decoding failed correctness
+checks. ASR and its aligner reside together. H3 runs in a separate Python
+environment to avoid dependency conflicts, with the GPU lock held until it exits.
+H3 uses BF16 encoder/diffusion weights and FP32 decoders, with FP16 autocast for
+MUSA video decoding. [Deployment notes](deploy/README.md) cover versions and probes.
+
+The default factory is `vocagent.local:create_providers`. Custom factories,
+selected with `--providers module:factory`, must return a complete
+[`Providers`](vocagent/providers.py) bundle, including candidate-count validation
+and resource cleanup. When concurrency is enabled, generation, safety, media,
+and speech implementations must support concurrent calls on the same instance.
+Local runs need checkpoint directories, with no API keys or inference endpoints.
 
 ## Configuration
 
-All model paths are local directories. `VOCAGENT_DEPLOY_ROOT` defaults to
-`/data/group6/vocagent`. The deployment container exposes only GPUs 4–7.
+`VOCAGENT_DEPLOY_ROOT` defaults to `/data/group6/vocagent`. All model paths point
+to local directories; the deployment container exposes only GPUs 4–7.
 
 | Variable | Default |
 | --- | --- |
@@ -164,77 +137,59 @@ All model paths are local directories. `VOCAGENT_DEPLOY_ROOT` defaults to
 | `SHIELDGEMMA_MODEL` | `$VOCAGENT_DEPLOY_ROOT/models/shieldgemma-2-4b-it` |
 | `MINIMAX_H3_MODEL` | `/data/group6/minimax-h3/models/MiniMax-H3` |
 | `MINIMAX_H3_PYTHON` | `$VOCAGENT_DEPLOY_ROOT/run-a406/h3-venv/bin/python` |
-| `MINIMAX_H3_STEPS` | `50` |
+| `MINIMAX_H3_PROFILE` | `quality` (1344×768); `preview` uses 960×544 |
+| `MINIMAX_H3_STEPS` | `50` for quality, `20` for preview |
 | `MINIMAX_H3_TIMEOUT_SECONDS` | `14400` per video candidate |
 
-H3 output is fixed in landscape at a width of 1344, a height of 768, and a requested duration
-of 15 seconds. Duration is rounded to its native video-frame grid within the
-15-second limit (345 frames at 24 fps, or 14.375 seconds). Outline generation and
-video prompt generation use the same 15-second budget. These settings are hardcoded.
-The earlier 1344×768, 10-second shape passed a full GPU capacity check. Native-resolution
-generation is slow on S4000: allow roughly 2.5 hours for a 10-second, 50-point
-render based on the measured single iteration; the default worker limit is four
-hours and can be overridden. Each clip teaches the single target word through
-one clear meaning and a compact scene.
+Both landscape profiles request 15 seconds, rounded to H3's native frame grid:
+345 frames at 24 fps, or 14.375 seconds. Outline and video prompt generation use
+the same 15-second budget. A measured capacity probe suggests roughly 2.5 hours
+for a 10-second, native-resolution, 50-point render on S4000; this is an estimate,
+not a measured full render. The worker timeout defaults to four hours.
 
-Provider factories must return a complete `Providers` bundle for all workflow
-stages. Local runs use checkpoint directories and do not need API endpoints,
-keys, or SSH tunnels.
+## Outputs
 
-## Outputs and tests
+| Path | Contents |
+| --- | --- |
+| `vocabulary.json` | Target word |
+| `outline.txt`, `video_prompt.txt` | Selected texts |
+| `outline_candidates/`, `video_prompt_candidates/` | All accepted text candidates |
+| `video_candidates/` | Accepted videos with `.wav` and `.json` sidecars |
+| `audio.wav`, `transcript.json` | Selected audio and aligned transcript |
+| `subtitles.ass`, `final.mp4` | Subtitles and finished video |
+| `benchmark.json` | Timing, resource use, and run status |
 
-Outputs include `vocabulary.json`, the selected `outline.txt` and `video_prompt.txt`,
-all accepted text candidates in `outline_candidates/` and `video_prompt_candidates/`,
-safe video candidates and sidecars in `video_candidates/`, the selected
-`audio.wav` and `transcript.json`, `subtitles.ass`, `final.mp4`, and `benchmark.json`.
-Text candidates are UTF-8 files named `candidate-N-attempt-M.txt`, with one-based
-candidate slot and attempt numbers. They are saved after passing safety and before
-quality selection, including accepted alternatives that were not selected.
-`--stop-after video-prompt` also retains both text candidate directories. Earlier
-artifacts, including accepted text candidates, remain available after a provider
-or quality-selection failure.
+Candidate files use `candidate-N-attempt-M` with one-based slot and attempt
+numbers. Accepted text is saved as UTF-8 before selection, including alternatives.
+Earlier artifacts remain after later failures. Stopping after `video-prompt`
+keeps both text candidate directories and the selected texts.
 
-Every started workflow writes `benchmark.json`, including runs stopped after video prompt generation
-and failed runs. `result.benchmarks` points to the report. It records each
-generation, safety check, selection, audio extraction, and
-subtitle operation, with candidate slot and attempt numbers for retries. The
-report contains per-call measurements, per-step aggregates, and a total for the
-workflow, including status and any failure. Input and output preflight failures
-that occur before the workflow starts do not create a report.
+Every started workflow writes a benchmark, including failed runs and text-only
+runs; preflight failures do not. `result.benchmarks` points to the report.
+It records per-call and per-step timings, retries, status, errors, and available
+throughput and memory metrics.
 
-Wall time is split into model loading, model running, and other work. Model
-loading measures checkpoint initialization and device placement; model running
-measures actual inference, including GPU synchronization. Other work includes
-preprocessing, media I/O, unloading, queueing for the shared GPU lock, and worker
-startup. Models already resident in memory need no new loading time. Each step's
-wall time sums its calls, so overlapping candidate threads can make the sum of
-step times larger than the workflow's actual elapsed time. The total reports
-both values. Workflow elapsed time starts after input/output validation and
-provider creation, and ends before the caller closes providers. Per-call CPU
-time measures the executing thread; total process CPU time covers all workflow
-threads, with isolated model worker CPU time reported separately. Token/frame
-counts, processed audio/video duration, and throughput are included when
-available; model throughput uses model running time.
-GPU memory reports peak allocated and reserved bytes by device, using the maximum
-observed peak across calls rather than adding memory usage. Custom providers
-still receive workflow wall and CPU timing; model-specific metrics require
-provider instrumentation.
-H3 worker measurements are imported into its generation step. If a hard timeout
-kills the worker before it saves a report, that call records
-`worker_benchmark_status: unavailable` rather than treating its missing model
-measurements as measured zero time.
+Timing separates model loading, synchronized inference, and other work such as
+preprocessing, media I/O, unloading, lock waits, and worker startup. Summed call
+times may exceed elapsed time when slots overlap. Workflow timing excludes
+provider creation/cleanup and input/output preflight. CPU metrics distinguish
+call-thread time, total process time, and isolated worker time; GPU memory uses
+maximum observed peaks, not sums. Throughput uses inference time. Custom providers
+receive wall and CPU timing; model metrics require instrumentation. H3 worker
+metrics join its generation step; a hard timeout without a worker report records
+`worker_benchmark_status: unavailable`.
+
+## Development
 
 ```sh
 python3 -m unittest discover -s tests -v
 ```
 
-Core workflow tests need only Python 3.10+. Real media tests require FFmpeg and
-FFprobe with libass, H.264, and AAC. Numerical H3 equivalence tests require
-PyTorch; real model smoke tests require the `hs` environments and checkpoints.
-Fake-provider tests alone do not establish model/runtime compatibility.
+Core tests need Python 3.10+. Media tests need FFmpeg/FFprobe with libass, H.264,
+and AAC; numerical H3 tests need PyTorch. Real model tests need the `hs`
+environments and checkpoints. Fake-provider tests do not verify model compatibility.
 
-Official references: [Qwen3-VL](https://huggingface.co/Qwen/Qwen3-VL-32B-Instruct),
-[Qwen3Guard](https://huggingface.co/Qwen/Qwen3Guard-Gen-8B),
-[Qwen3-ASR and aligner](https://github.com/QwenLM/Qwen3-ASR),
-[ShieldGemma 2](https://huggingface.co/google/shieldgemma-2-4b-it),
-[H3 MUSA recipe](https://github.com/vllm-project/vllm-omni/blob/main/recipes/MiniMaxAI/MiniMax-H3-MUSA.md).
+The former `storyboard` stage is now `video_prompt` in Python and filenames, or
+`video-prompt` in CLI flags. Use `generate_video_prompt`, `video_prompt_seconds`,
+and `video_prompt_candidate_count`. Old names have no aliases; existing outputs
+are not renamed.
