@@ -1,10 +1,8 @@
 # Video Prompt Writing Guide (T2VA)
 
-## 1. Task Overview
-
 **T2VA** builds a complete audiovisual timeline from text.
 
-## 2. Final Prompt Structure
+## Prompt structure
 
 Begin directly with the three core fields:
 
@@ -16,23 +14,21 @@ overall_soundscape: ...
 non_diegetic_music: ...
 ```
 
-- **integrated_multimodal_description**: Describes visuals, actions, shots, speakers, dialogue, singing, and diegetic audio along the timeline.
-- **overall_soundscape**: Summarizes ambient sound, physical action sounds, and non-verbal human sounds across the entire video.
-- **non_diegetic_music**: Describes background music that the characters cannot hear and only the audience can hear.
+- **integrated_multimodal_description**: Visuals, actions, shots, speakers, dialogue, singing, and diegetic audio along the timeline.
+- **overall_soundscape**: Ambient sound, physical action sounds, and non-verbal human sounds across the video.
+- **non_diegetic_music**: Background music heard only by the audience, not the characters.
 
-## 3. How to Write the Three Core Sections
+## Visuals and action
 
-### 3.1 Develop the Multimodal Description Along the Timeline
+Write `integrated_multimodal_description` as a timeline. Every detail should be visible or audible: style, initial composition, subject appearance and position, setting, key props, actions, reactions, shot changes, spoken language, and synchronized diegetic sound.
 
-`integrated_multimodal_description` is the main body of the rewritten prompt. Every detail should correspond to something visible or audible: visual style, initial composition, subject appearance and position, scene and key props, actions and reactions, shot changes, spoken language, and synchronized diegetic sound.
-
-At the beginning of `[Shot 1]`, state the overall style and initial composition. Common styles include `Cinematic`, `live-action`, `2D-animated`, `3D CG`, `claymation`, `watercolor`, and `vintage film`. Select the style from the user's text.
+Start `[Shot 1]` with the overall style and initial composition. Choose the style from the user's text; examples include `Cinematic`, `live-action`, `2D-animated`, `3D CG`, `claymation`, `watercolor`, and `vintage film`.
 
 ```text
 [Shot 1] Live-action, cinematic, a medium-wide shot frames...
 ```
 
-### 3.2 Shots and Cuts
+## Shots and cuts
 
 Do not add a timestamp to the first shot. Use sequential shot numbers for later shots, and begin each one with a strictly increasing cut time that falls within the video duration:
 
@@ -40,11 +36,11 @@ Do not add a timestamp to the first shot. Use sequential shot numbers for later 
 [Shot 2] At 00:03.500, the camera cuts to...
 ```
 
-For ordinary cuts, use `the camera cuts to`, `the shot cuts to`, `the shot transitions to`, `the shot changes to`, or `the shot switches to`. When explicitly requested by the user, cross-dissolve, fade, or wipe may also be used. A cut should introduce new information about the subject, space, state, viewpoint, or time. If only the distance or a slight angle needs to change, prefer camera motion.
+For ordinary cuts, use `the camera cuts to`, `the shot cuts to`, `the shot transitions to`, `the shot changes to`, or `the shot switches to`. Use cross-dissolve, fade, or wipe only when the user explicitly requests it. Each cut should reveal new information about the subject, space, state, viewpoint, or time. Prefer camera motion for changes in distance or slight changes in angle.
 
-### 3.3 Camera Motion: Motion Type + Amplitude + Speed
+## Camera motion
 
-A complete camera-motion expression has three dimensions: the **motion type** defines how the camera moves, **amplitude** defines the range of compositional change, and **speed** defines the pacing of that change. Add amplitude and speed only when they are meaningful; medium amplitude and normal speed are usually omitted.
+Describe the **motion type** (how the camera moves), **amplitude** (the range of composition change), and **speed**. Include amplitude and speed only when meaningful; usually omit medium amplitude and normal speed.
 
 | Dimension | Available Expression | Description |
 |-|-|-|
@@ -65,7 +61,7 @@ A complete camera-motion expression has three dimensions: the **motion type** de
 | Speed | `at slow speed` | Slow movement |
 | Speed | `at fast speed` | Fast movement |
 
-Camera motion should be written as a natural English action within the shot, rather than stacked as separate labels at the end of a sentence:
+Write camera motion as a natural English action within the shot, not as separate labels at the sentence's end:
 
 ```text
 The camera pushes in with small amplitude at slow speed toward the folded letter in her hands.
@@ -73,11 +69,11 @@ The camera pans right with large amplitude at fast speed, revealing the open doo
 The camera holds a static shot as the runner exits the frame.
 ```
 
-### 3.4 Speakers, Dialogue, and Singing
+## Speakers, dialogue, and singing
 
-Subjects who speak, sing, or produce an off-screen human voice use stable IDs such as `(S1)` and `(S2)`. When multiple already-numbered speakers speak or sing together, use a compound ID such as `(S1,S2)`. A speaker keeps the same ID across shots; characters who never vocalize receive no speaker ID.
+Give subjects who speak, sing, or produce an off-screen human voice stable IDs such as `(S1)` and `(S2)`. Use a compound ID such as `(S1,S2)` when already-numbered speakers speak or sing together. Keep IDs consistent across shots; do not assign them to characters who never vocalize.
 
-When a speaker first appears, provide enough information from the visual and audio context to establish a stable identity, such as character type, age, gender, whether the person is on-screen, pitch, timbre, speaking rate, or accent. Place the speaker's identifying phrase, ID, action, and delivery outside `<d>`. Inside `<d>`, include only the language tag and the actual user-provided spoken content. Preserve every original word and punctuation mark verbatim; do not translate or rewrite them.
+Introduce each speaker with enough visual and audio detail to establish their identity, such as character type, age, gender, on-screen presence, pitch, timbre, speaking rate, or accent. Keep the identifying phrase, ID, action, and delivery outside `<d>`. Inside `<d>`, include only the language tag and user-provided spoken content. Preserve every original word and punctuation mark verbatim; do not translate or rewrite them.
 
 ```text
 The young woman with a quiet, breathy voice (S1) says: <d>[English] I get off at the next station.</d>
@@ -90,33 +86,33 @@ For voiceover, use the exact phrase `says in an off-screen voiceover`. Immediate
 The man (S1) says in an off-screen voiceover: <d>[English] I still remember that road.</d> while his lips remain completely closed.
 ```
 
-When the same line of dialogue or lyrics crosses a cut, use `<scenetrans>` at the connecting points in both parts and explicitly state that the audio continues across the cut. Use `<cutoff>` when speech is truncated by the end of the video. Continuity may be expressed with `continues seamlessly across the cut`, `continues uninterrupted into the next shot`, `carries over from the previous shot`, or `remains audible across the transition`.
+When the same line of dialogue or lyrics crosses a cut, put `<scenetrans>` at the connecting points in both parts and explicitly state that the audio continues across the cut. Use `<cutoff>` when the video's end truncates speech. Continuity phrases include `continues seamlessly across the cut`, `continues uninterrupted into the next shot`, `carries over from the previous shot`, and `remains audible across the transition`.
 
-### 3.5 On-Screen Text
+## On-screen text
 
-Place any banner, sign, label, subtitle, or neon text that is actually visible on screen in English double quotation marks. Preserve the original text and punctuation verbatim, without translation.
+Put visible banner, sign, label, subtitle, or neon text in English double quotation marks. Preserve the original text and punctuation verbatim, without translation.
 
 ```text
 A red neon sign reading "营业中" glows above the doorway.
 ```
 
-### 3.6 overall_soundscape
+## overall_soundscape
 
-Use 1–4 English sentences in one continuous paragraph to summarize the ambient sound, physical action sounds, and non-verbal human sounds across the full video, such as wind, rain, traffic, footsteps, fabric movement, impacts, breathing, laughter, or panting. Dialogue, singing, and diegetic music already belong in the multimodal description and should not be repeated here. Use `N/A` only when the user explicitly requests complete silence throughout the video.
+Use one paragraph of 1–4 English sentences to summarize ambient sound, physical action sounds, and non-verbal human sounds across the video: wind, rain, traffic, footsteps, fabric movement, impacts, breathing, laughter, or panting. Do not repeat dialogue, singing, or diegetic music from the multimodal description. Use `N/A` only when the user explicitly requests complete silence throughout the video.
 
 ```text
 overall_soundscape: Steady rain taps against the café windows while low room ambience continues underneath. The entrance bell rings once, followed by wet footsteps and the soft scrape of a chair.
 ```
 
-### 3.7 non_diegetic_music
+## non_diegetic_music
 
-Use 1–3 English sentences to describe background music that the characters cannot hear and only the audience can hear. Focus on instrumentation, speed, rhythm, and dynamic changes; do not use abstract mood words or explain the emotional function of the score. Singing, instruments, radio, television, or phone music audible to the characters are diegetic events and should appear in the multimodal description. Use `N/A` when there is no non-diegetic music.
+Use 1–3 English sentences to describe background music heard only by the audience. Describe instrumentation, speed, rhythm, and dynamic changes; avoid abstract mood words or explanations of the score's emotional function. Singing, instruments, radio, television, or phone music heard by the characters belong in the multimodal description. Use `N/A` when there is no non-diegetic music.
 
 ```text
 non_diegetic_music: Sparse piano notes at a slow tempo, joined by sustained low strings that gradually increase in volume before fading out.
 ```
 
-## 4. Example
+## Example
 
 Construct the complete timeline directly from the text. You may add scene, character, action, and sound details that remain consistent with the user's intent.
 
